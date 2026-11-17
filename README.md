@@ -10,9 +10,31 @@ A simple laundry shop manager that runs on Firebase. It works on phones and comp
 
 "Money in" counts an order on the day it was **paid**, not the day it was dropped off.
 
+## Manager and shop staff
+
+Each person has their own login and one of two roles.
+
+| | Shop staff | Manager |
+|---|:-:|:-:|
+| Take new orders | ✓ | ✓ |
+| Mark paid / collected, send receipts | ✓ | ✓ |
+| Add expenses | ✓ | ✓ |
+| "Today" screen: money in, expenses, cash in hand | ✓ | ✓ |
+| Weekly / monthly reports and profit | | ✓ |
+| Edit or delete orders, undo a payment | | ✓ |
+| Delete expenses | | ✓ |
+| Change prices and shop settings | | ✓ |
+| Add / remove staff | | ✓ |
+
+Every order records **who took it, who marked it paid and who marked it collected**, and every expense records who added it. Reports has a "Payments taken by" breakdown so the manager can match cash to each person.
+
+These limits are enforced by the Firestore security rules (`firestore.rules`), not just hidden in the app.
+
+**Adding staff:** the manager opens **Settings → Staff**, enters the person's name and email, and taps **Add person**. The staff member opens the app, taps **First time? Create an account** with that same email, and they're in. To remove someone, tap ✕ next to their name. They lose access immediately.
+
 ## Try it right away (demo mode)
 
-While `public/firebase-config.js` is empty, the app runs in demo mode and saves data in that browser only.
+While `public/firebase-config.js` is empty, the app runs in demo mode and saves data in that browser only. A switch at the top lets you try both the **Manager** and **Shop staff** sides.
 
 ```bash
 cd public && python3 -m http.server 8080   # then open http://localhost:8080
@@ -32,15 +54,24 @@ firebase login
 firebase deploy
 ```
 
-Open the hosting URL, tap **New shop? Create an account**, and sign in on every phone the shop uses with that same account. All of them will share the same orders.
+Open the hosting URL. The manager taps **First time? Create an account**, then **I'm the manager: set up my shop**. Then add each staff member under **Settings → Staff**.
 
 ## Data layout
 
 ```
-users/{uid}/settings/main     shop name, currency, price list, expense types
-users/{uid}/orders/{id}       ticket, customer, phone, dropDate, lines[{name, price, qty}], total,
-                              paid, paidOn, collected, collectedOn, note
-users/{uid}/expenses/{id}     category, amount, date, note
+shops/{shopId}                  ownerUid, settings (shop name, currency, price list, expense types)
+shops/{shopId}/members/{uid}    role ("manager" | "staff"), name, email
+shops/{shopId}/invites/{email}  pending staff invites
+shops/{shopId}/orders/{id}      ticket, customer, phone, dropDate, lines[{name, price, qty}], total,
+                                paid, paidOn, paidBy, collected, collectedOn, collectedBy, createdBy, note
+shops/{shopId}/expenses/{id}    category, amount, date, note, addedBy
+invites/{email}                 shopId, role (looked up when a new staff member first signs in)
+users/{uid}                     shopId
 ```
 
-`firestore.rules` lets each account read and write only its own data.
+## Testing the security rules
+
+```bash
+npm install
+npm run test:rules     # starts the Firestore emulator (needs Java) and runs 41 permission checks
+```

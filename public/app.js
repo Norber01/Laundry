@@ -26,6 +26,10 @@ let orders = [];
 let expenses = [];
 let unsubs = [];
 let currentUser = null;
+let profile = null; // { role, name, shopId, owner }
+let isManager = false;
+let members = [];
+let invites = [];
 let editingId = null; // order being edited
 let qty = {}; // itemId -> count on the order form
 let linePrices = {}; // itemId -> price (frozen prices when editing)
@@ -44,6 +48,7 @@ const moneyShort = (v) => `${settings.currency} ${num(v).toLocaleString(undefine
 const pad = (n) => String(n).padStart(2, "0");
 const iso = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 const today = () => iso(new Date());
+const me = () => ({ name: profile?.name || "", uid: currentUser?.uid || "" });
 const parseISO = (s) => { const [y, m, d] = s.split("-").map(Number); return new Date(y, m - 1, d); };
 const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
 const daysBetween = (a, b) => Math.round((parseISO(b) - parseISO(a)) / 86400000);
@@ -90,31 +95,86 @@ async function boot() {
     return;
   }
   $("#demoBanner").hidden = !isDemo;
-  store.onAuth((user) => {
-    currentUser = user;
-    $("#boot").hidden = true;
-    unsubs.forEach((u) => u()); unsubs = [];
-    if (!user) { $("#app").hidden = true; $("#auth").hidden = false; return; }
-    $("#auth").hidden = true; $("#app").hidden = false;
-    $("#accountEmail").textContent = user.email;
-    let settingsSeen = false;
-    unsubs.push(store.watch("settings", (s) => {
-      if (!s && !settingsSeen) { store.saveSettings(DEFAULT_SETTINGS); }
-      settingsSeen = true;
-      settings = { ...structuredClone(DEFAULT_SETTINGS), ...(s || {}) };
-      applySettings();
-    }));
-    unsubs.push(store.watch("orders", (list) => { orders = list.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)); renderAll(); }));
-    unsubs.push(store.watch("expenses", (list) => { expenses = list.sort((a, b) => (b.date || "").localeCompare(a.date || "") || (b.createdAt || 0) - (a.createdAt || 0)); renderAll(); }));
-    resetOrderForm();
-  });
+  store.onAuth(startSession);
 }
+
+const screen = (name) => ["boot", "auth", "setup", "app"].forEach((k) => ($(`#${k}`).hidden = k !== name));
+
+async function startSession(user) {
+  currentUser = user;
+  unsubs.forEach((u) => u()); unsubs = [];
+  orders = []; expenses = []; members = []; invites = [];
+  if (!user) return screen("auth");
+  screen("boot");
+  try {
+    profile = await store.loadProfile(user);
+  } catch (e) {
+    console.error(e);
+    $("#boot").innerHTML = `<div style="padding:24px;text-align:center"><p class="error">Could not load your shop. Check your internet connection.</p><button class="btn primary" onclick="location.reload()">Try again</button></div>`;
+    return;
+  }
+  if (profile.status !== "ok") return showSetup(user, profile.status);
+
+  isManager = profile.role === "manager";
+  document.body.classList.toggle("staff", !isManager);
+  document.body.classList.toggle("manager", isManager);
+  $("#roleChip").textContent = isManager ? "Manager" : "Staff";
+  $("#reportsTabLabel").textContent = isManager ? "Reports" : "Today";
+  $("#reportsTitle").textContent = isManager ? "Reports" : "Today";
+  $("#settingsTabLabel").textContent = isManager ? "Settings" : "Account";
+  $$("#demoRole button").forEach((b) => b.classList.toggle("active", b.dataset.r === profile.role));
+  $("#accountEmail").innerHTML = `${esc(profile.name)} <span class="muted">· ${isManager ? "Manager" : "Shop staff"}</span><div class="muted small">${esc(user.email)}</div>`;
+  if (!isManager) period = "today";
+  screen("app");
+
+  unsubs.push(store.watch("settings", (s) => {
+    if (!s && isManager) store.saveSettings(DEFAULT_SETTINGS);
+    settings = { ...structuredClone(DEFAULT_SETTINGS), ...(s || {}) };
+    applySettings();
+  }));
+  unsubs.push(store.watch("orders", (list) => { orders = list.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)); renderAll(); }));
+  unsubs.push(store.watch("expenses", (list) => { expenses = list.sort((a, b) => (b.date || "").localeCompare(a.date || "") || (b.createdAt || 0) - (a.createdAt || 0)); renderAll(); }));
+  if (isManager) {
+    unsubs.push(store.watch("members", (list) => { members = list; renderStaff(); }));
+    unsubs.push(store.watch("invites", (list) => { invites = list; renderStaff(); }));
+  }
+  resetOrderForm();
+  const cur = $$("#tabs button").find((b) => b.classList.contains("active"))?.dataset.view || "new";
+  show(cur);
+}
+
+function showSetup(user, status) {
+  screen("setup");
+  $("#setupEmail2").textContent = user.email;
+  $("#setupName").value = user.displayName || $("#authName").value || "";
+  $("#setupTitle").textContent = status === "removed" ? "No access" : "Welcome";
+  $("#setupSub").innerHTML = status === "removed"
+    ? `<b>${esc(user.email)}</b> is no longer on a shop's staff list. Ask the manager to add you again.`
+    : `Signed in as <b>${esc(user.email)}</b>`;
+}
+$("#setupRefresh").onclick = () => startSession(currentUser);
+$("#setupSignOut").onclick = () => store.signOut();
+$("#setupForm").onsubmit = async (e) => {
+  e.preventDefault();
+  const btn = $("#setupForm button"); btn.disabled = true;
+  try {
+    await store.createShop(currentUser, $("#setupShop").value.trim(), $("#setupName").value.trim(), DEFAULT_SETTINGS);
+    await startSession(currentUser);
+  } catch (ex) { console.error(ex); alert("Could not create the shop: " + (ex.message || ex)); }
+  finally { btn.disabled = false; }
+};
+$("#demoRole").addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-r]"); if (!b || !store.switchRole) return;
+  store.switchRole(b.dataset.r);
+});
 
 let signUpMode = false;
 $("#authToggle").onclick = () => {
   signUpMode = !signUpMode;
   $("#authSubmit").textContent = signUpMode ? "Create account" : "Sign in";
-  $("#authToggle").textContent = signUpMode ? "Already have an account? Sign in" : "New shop? Create an account";
+  $("#authToggle").textContent = signUpMode ? "Already have an account? Sign in" : "First time? Create an account";
+  $("#authNameWrap").hidden = !signUpMode;
+  $("#authName").required = signUpMode;
   $("#authPass").autocomplete = signUpMode ? "new-password" : "current-password";
 };
 $("#authForm").onsubmit = async (e) => {
@@ -123,7 +183,7 @@ $("#authForm").onsubmit = async (e) => {
   const btn = $("#authSubmit"); btn.disabled = true;
   try {
     const em = $("#authEmail").value.trim(), pw = $("#authPass").value;
-    await (signUpMode ? store.signUp(em, pw) : store.signIn(em, pw));
+    await (signUpMode ? store.signUp(em, pw, $("#authName").value.trim()) : store.signIn(em, pw));
   } catch (ex) {
     err.textContent = friendlyAuthError(ex); err.hidden = false;
   } finally { btn.disabled = false; }
@@ -143,10 +203,11 @@ function friendlyAuthError(e) {
   if (c.includes("network")) return "No internet connection.";
   return e?.message || "Something went wrong.";
 }
-$("#signOut").onclick = () => { if (isDemo) return toast("Demo mode has no account"); store.signOut(); };
+$("#signOut").onclick = () => { if (isDemo) return toast("Demo mode has no account. Use the switch at the top."); store.signOut(); };
 
 /* ================= Navigation ================= */
 function show(view) {
+  if (view === "new" && editingId && !isManager) resetOrderForm();
   $$("#tabs button").forEach((b) => b.classList.toggle("active", b.dataset.view === view));
   $$(".view").forEach((v) => (v.hidden = v.id !== `view-${view}`));
   window.scrollTo({ top: 0 });
@@ -333,11 +394,17 @@ $("#orderForm").onsubmit = async (e) => {
     paidOn: paid ? $("#oPaidOn").value || today() : null,
   };
   if (editingId) {
+    if (!isManager) return toast("Only the manager can edit orders");
+    const before = orders.find((o) => o.id === editingId);
+    if (data.paid && !before?.paid) { data.paidBy = me().name; data.paidByUid = me().uid; }
+    if (!data.paid) { data.paidBy = null; data.paidByUid = null; }
     await store.update("orders", editingId, data);
     toast("Order updated");
   } else {
     data.ticket = nextTicket();
     data.createdAt = Date.now();
+    data.createdBy = me().name; data.createdByUid = me().uid;
+    if (data.paid) { data.paidBy = me().name; data.paidByUid = me().uid; }
     data.collected = false;
     data.collectedOn = null;
     await store.add("orders", data);
@@ -396,10 +463,10 @@ function renderOrders() {
       <div class="order-items">${items}${o.note ? `<div class="note">“${esc(o.note)}”</div>` : ""}</div>
       <div class="status-row">
         ${o.paid
-          ? `<span class="pill ok">✓ Paid ${fmtDate(o.paidOn)}</span>`
+          ? `<span class="pill ok">✓ Paid ${fmtDate(o.paidOn)}${o.paidBy ? ` · ${esc(o.paidBy)}` : ""}</span>`
           : `<span class="pill warn">● Not paid</span>`}
         ${o.collected
-          ? `<span class="pill ok">✓ Collected ${fmtDate(o.collectedOn)}</span>`
+          ? `<span class="pill ok">✓ Collected ${fmtDate(o.collectedOn)}${o.collectedBy ? ` · ${esc(o.collectedBy)}` : ""}</span>`
           : `<span class="pill ${waitDays >= 7 ? "alert" : "info"}">◷ Not collected yet${waitDays > 0 ? ` · ${waitDays} day${waitDays === 1 ? "" : "s"}` : ""}</span>`}
       </div>
       <div class="order-actions">
@@ -409,11 +476,12 @@ function renderOrders() {
         <details class="more">
           <summary class="btn small ghost" aria-label="More actions">⋯</summary>
           <div class="menu">
-            <button data-a="edit">Edit order</button>
             <button data-a="print">Print receipt</button>
+            ${isManager ? `<button data-a="edit">Edit order</button>
             ${o.paid ? `<button data-a="unpay">Undo paid</button>` : ""}
             ${o.collected ? `<button data-a="uncollect">Undo collected</button>` : ""}
-            <button data-a="delete" class="danger">Delete order</button>
+            <button data-a="delete" class="danger">Delete order</button>` : ""}
+            ${o.createdBy ? `<div class="menu-note">Taken by ${esc(o.createdBy)}</div>` : ""}
           </div>
         </details>
       </div>
@@ -426,18 +494,19 @@ $("#orderList").addEventListener("click", async (e) => {
   const card = btn.closest(".order"); const o = orders.find((x) => x.id === card.dataset.id); if (!o) return;
   btn.closest("details")?.removeAttribute("open");
   const who = `${ticketStr(o.ticket)} ${o.customer} · ${money(o.total)}`;
+  if (["unpay", "uncollect", "edit", "delete"].includes(btn.dataset.a) && !isManager) return toast("Only the manager can do that");
   switch (btn.dataset.a) {
     case "pay": {
       const d = await askDate("Mark as paid", who); if (!d) return;
-      await store.update("orders", o.id, { paid: true, paidOn: d }); toast("Marked paid"); break;
+      await store.update("orders", o.id, { paid: true, paidOn: d, paidBy: me().name, paidByUid: me().uid }); toast("Marked paid"); break;
     }
     case "collect": {
       if (!o.paid && !confirm(`${o.customer} has not paid yet. Mark collected anyway?`)) return;
       const d = await askDate("Mark as collected", who); if (!d) return;
-      await store.update("orders", o.id, { collected: true, collectedOn: d }); toast("Marked collected"); break;
+      await store.update("orders", o.id, { collected: true, collectedOn: d, collectedBy: me().name, collectedByUid: me().uid }); toast("Marked collected"); break;
     }
-    case "unpay": await store.update("orders", o.id, { paid: false, paidOn: null }); break;
-    case "uncollect": await store.update("orders", o.id, { collected: false, collectedOn: null }); break;
+    case "unpay": if (confirm(`Undo the payment for ${who}?`)) await store.update("orders", o.id, { paid: false, paidOn: null, paidBy: null, paidByUid: null }); break;
+    case "uncollect": await store.update("orders", o.id, { collected: false, collectedOn: null, collectedBy: null, collectedByUid: null }); break;
     case "edit": startEdit(o); break;
     case "receipt": sendReceipt(o); break;
     case "print": printReceipt(o); break;
@@ -513,6 +582,7 @@ $("#expenseForm").onsubmit = async (e) => {
     date: $("#eDate").value || today(),
     note: $("#eNote").value.trim(),
     createdAt: Date.now(),
+    addedBy: me().name, addedByUid: me().uid,
   });
   $("#eAmount").value = ""; $("#eNote").value = "";
   toast(`Expense added · ${money(amt)}`);
@@ -529,8 +599,8 @@ function renderExpenses() {
     const head = x.date !== lastDate ? `<div class="date-sep">${fmtDate(x.date)}</div>` : "";
     lastDate = x.date;
     return `${head}<div class="exp-row" data-id="${x.id}">
-      <div><b>${esc(x.category)}</b>${x.note ? `<div class="muted small">${esc(x.note)}</div>` : ""}</div>
-      <div class="row"><span class="amt">${money(x.amount)}</span><button class="icon-btn" data-del aria-label="Delete expense">✕</button></div>
+      <div><b>${esc(x.category)}</b>${x.note || x.addedBy ? `<div class="muted small">${[x.note, x.addedBy && `by ${x.addedBy}`].filter(Boolean).map(esc).join(" · ")}</div>` : ""}</div>
+      <div class="row"><span class="amt">${money(x.amount)}</span>${isManager ? `<button class="icon-btn" data-del aria-label="Delete expense">✕</button>` : ""}</div>
     </div>`;
   }).join("");
 }
@@ -570,7 +640,9 @@ function renderReports() {
   $("#stats").innerHTML = `
     <div class="stat"><div class="label">Money in</div><div class="value">${money(income)}</div><div class="sub">${paidOrders.length} payment${paidOrders.length === 1 ? "" : "s"}</div></div>
     <div class="stat"><div class="label">Expenses</div><div class="value">${money(spent)}</div><div class="sub">${exp.length} record${exp.length === 1 ? "" : "s"}</div></div>
-    <div class="stat hero ${profit < 0 ? "neg" : ""}"><div class="label">${profit < 0 ? "Loss" : "Profit"}</div><div class="value">${money(Math.abs(profit))}</div><div class="sub">money in − expenses</div></div>
+    ${isManager
+      ? `<div class="stat hero ${profit < 0 ? "neg" : ""}"><div class="label">${profit < 0 ? "Loss" : "Profit"}</div><div class="value">${money(Math.abs(profit))}</div><div class="sub">money in − expenses</div></div>`
+      : `<div class="stat hero ${profit < 0 ? "neg" : ""}"><div class="label">Cash in hand</div><div class="value">${profit < 0 ? "−" : ""}${money(Math.abs(profit))}</div><div class="sub">money in − expenses today</div></div>`}
     <div class="stat"><div class="label">Orders taken</div><div class="value">${dropped.length}</div><div class="sub">${itemsIn} items · ${moneyShort(billed)} billed</div></div>`;
 
   // Chart: day-by-day for week / month views; "today" shows the current week.
@@ -592,6 +664,11 @@ function renderReports() {
   const cats = {};
   exp.forEach((x) => { cats[x.category] = (cats[x.category] || 0) + num(x.amount); });
   $("#expenseBreakdown").innerHTML = barList(Object.entries(cats).sort((a, b) => b[1] - a[1]), money, "No expenses in this period.", "expense");
+  if (isManager) {
+    const by = {};
+    paidOrders.forEach((o) => { const k = o.paidBy || "Not recorded"; by[k] = (by[k] || 0) + num(o.total); });
+    $("#staffBreakdown").innerHTML = barList(Object.entries(by).sort((a, b) => b[1] - a[1]), money, "No payments in this period.");
+  }
 
   // Outstanding (all time)
   const t = today();
@@ -694,12 +771,71 @@ $("#exportCsv").onclick = () => {
   a.click(); URL.revokeObjectURL(a.href);
 };
 
+/* ================= Staff (manager only) ================= */
+function renderStaff() {
+  if (!isManager) return;
+  const t = today();
+  const isOwner = (m) => m.owner || m.id === profile.shopId;
+  const rows = [...members].sort((a, b) => (a.role === b.role ? (a.name || "").localeCompare(b.name || "") : a.role === "manager" ? -1 : 1));
+  const html = rows.map((m) => {
+    const takenToday = orders.filter((o) => o.paidByUid === m.id && o.paidOn === t).reduce((s, o) => s + num(o.total), 0);
+    const self = m.id === currentUser.uid;
+    return `<div class="member" data-uid="${esc(m.id)}">
+      <div class="avatar">${esc((m.name || m.email || "?").trim()[0] || "?").toUpperCase()}</div>
+      <div class="member-info"><b>${esc(m.name || m.email)}${self ? ' <span class="muted">(you)</span>' : ""}</b>
+        <div class="muted small">${esc(m.email || "")}${takenToday ? ` · took ${money(takenToday)} today` : ""}</div></div>
+      ${isOwner(m) || self
+        ? `<span class="role-tag ${m.role}">${m.role === "manager" ? "Manager" : "Staff"}${isOwner(m) ? " · owner" : ""}</span>`
+        : `<select class="role-select" aria-label="Role for ${esc(m.name)}"><option value="staff" ${m.role === "staff" ? "selected" : ""}>Shop staff</option><option value="manager" ${m.role === "manager" ? "selected" : ""}>Manager</option></select>
+           <button class="icon-btn" data-remove title="Remove" aria-label="Remove ${esc(m.name)}">✕</button>`}
+    </div>`;
+  }).join("");
+  const inv = invites.map((i) => `<div class="member pending" data-email="${esc(i.id)}">
+      <div class="avatar">?</div>
+      <div class="member-info"><b>${esc(i.name || i.id)}</b><div class="muted small">${esc(i.id)} · waiting for them to sign up</div></div>
+      <span class="role-tag ${i.role}">${i.role === "manager" ? "Manager" : "Staff"}</span>
+      <button class="icon-btn" data-cancel title="Cancel invite" aria-label="Cancel invite">✕</button>
+    </div>`).join("");
+  $("#memberList").innerHTML = html + inv || `<div class="empty small">Only you so far.</div>`;
+}
+$("#memberList").addEventListener("change", async (e) => {
+  if (!e.target.matches(".role-select")) return;
+  const uid = e.target.closest(".member").dataset.uid;
+  const m = members.find((x) => x.id === uid);
+  try { await store.updateMember(uid, { role: e.target.value }); toast(`${m?.name} is now ${e.target.value === "manager" ? "a manager" : "shop staff"}`); }
+  catch (ex) { console.error(ex); toast("Could not change role"); renderStaff(); }
+});
+$("#memberList").addEventListener("click", async (e) => {
+  const row = e.target.closest(".member"); if (!row) return;
+  if (e.target.closest("[data-remove]")) {
+    const m = members.find((x) => x.id === row.dataset.uid);
+    if (!confirm(`Remove ${m?.name} from the shop? They will no longer be able to use the app.`)) return;
+    try { await store.removeMember(row.dataset.uid); toast("Removed"); } catch (ex) { console.error(ex); toast("Could not remove"); }
+  }
+  if (e.target.closest("[data-cancel]")) {
+    try { await store.cancelInvite(row.dataset.email); toast("Invite cancelled"); } catch (ex) { console.error(ex); toast("Could not cancel"); }
+  }
+});
+$("#inviteForm").onsubmit = async (e) => {
+  e.preventDefault();
+  const email = $("#invEmail").value.trim().toLowerCase(), name = $("#invName").value.trim(), role = $("#invRole").value;
+  if (members.some((m) => (m.email || "").toLowerCase() === email)) return toast("That person is already on the staff list");
+  const btn = $("#inviteForm button[type=submit]"); btn.disabled = true;
+  try {
+    await store.inviteStaff(email, name, role);
+    $("#inviteForm").reset();
+    toast(`${name} added. They can now create an account with ${email}`);
+  } catch (ex) { console.error(ex); toast("Could not add. Check your internet connection."); }
+  finally { btn.disabled = false; }
+};
+
 /* ================= Render ================= */
 function renderAll() {
   if (!currentUser) return;
   renderOrders();
   renderExpenses();
   if (!$("#view-reports").hidden) renderReports();
+  if (isManager) renderStaff();
   if (!editingId) $("#orderTicket").textContent = `Ticket ${ticketStr(nextTicket())}`;
   const names = [...new Set(orders.map((o) => o.customer).filter(Boolean))].slice(0, 300);
   $("#customerList").innerHTML = names.map((n) => `<option value="${esc(n)}">`).join("");

@@ -21,28 +21,58 @@
       <img src="icon.svg" alt="" width="56" height="56" />
       <h1>Laundry Book</h1>
       <p class="muted">Sign in to your shop</p>
+      <label id="authNameWrap" hidden>Your name<input id="authName" autocomplete="name" placeholder="e.g. Akosua" /></label>
       <label>Email<input id="authEmail" type="email" autocomplete="email" required /></label>
       <label>Password<input id="authPass" type="password" autocomplete="current-password" minlength="6" required /></label>
       <p id="authError" class="error" hidden></p>
       <button class="btn primary block" type="submit" id="authSubmit">Sign in</button>
-      <button class="link" type="button" id="authToggle">New shop? Create an account</button>
+      <button class="link" type="button" id="authToggle">First time? Create an account</button>
       <button class="link" type="button" id="authReset">Forgot password?</button>
     </form>
+  </section>
+
+  <!-- First sign-in: set up a shop or wait for an invite -->
+  <section id="setup" class="auth" hidden>
+    <div class="setup-wrap">
+      <div class="setup-head">
+        <img src="icon.svg" alt="" width="48" height="48" />
+        <h1 id="setupTitle">Welcome</h1>
+        <p class="muted" id="setupSub">Signed in as <b id="setupEmail"></b></p>
+      </div>
+      <div class="setup-grid">
+        <div class="auth-card left">
+          <h3>I work at a laundry</h3>
+          <p class="muted small">Ask the manager to add this email under <b>Settings → Staff</b>, then tap the button below.</p>
+          <div class="email-box" id="setupEmail2"></div>
+          <button class="btn primary block" id="setupRefresh">I've been added — continue</button>
+        </div>
+        <form class="auth-card left" id="setupForm">
+          <h3>I'm the manager — set up my shop</h3>
+          <label>Shop name<input id="setupShop" required placeholder="e.g. Clean & Fresh Laundry" /></label>
+          <label>Your name<input id="setupName" required /></label>
+          <button class="btn ghost block" type="submit">Create shop</button>
+        </form>
+      </div>
+      <button class="link" id="setupSignOut">Sign out</button>
+    </div>
   </section>
 
   <!-- App -->
   <div id="app" class="app" hidden>
     <header class="topbar">
-      <div class="brand"><img src="icon.svg" alt="" width="28" height="28" /><span id="shopName">Laundry Book</span></div>
+      <div class="brand"><img src="icon.svg" alt="" width="28" height="28" /><span id="shopName">Laundry Book</span><span class="role-chip" id="roleChip"></span></div>
       <nav class="tabs" id="tabs">
         <button data-view="new" class="active"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg><span>New</span></button>
         <button data-view="orders"><svg viewBox="0 0 24 24"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2zM9 8h6M9 12h6"/></svg><span>Orders</span><b id="pendingBadge" class="badge" hidden></b></button>
         <button data-view="expenses"><svg viewBox="0 0 24 24"><path d="M3 7h18v12H3zM3 11h18M7 15h3"/></svg><span>Expenses</span></button>
-        <button data-view="reports"><svg viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg><span>Reports</span></button>
-        <button data-view="settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg><span>Settings</span></button>
+        <button data-view="reports"><svg viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg><span id="reportsTabLabel">Reports</span></button>
+        <button data-view="settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg><span id="settingsTabLabel">Settings</span></button>
       </nav>
     </header>
-    <div id="demoBanner" class="demo-banner" hidden>Demo mode — data is saved on this device only. Add your Firebase config to sync across phones.</div>
+    <div id="demoBanner" class="demo-banner" hidden>
+      <span>Demo mode (this device only). Try each side:</span>
+      <span class="seg" id="demoRole"><button data-r="manager">Manager</button><button data-r="staff">Shop staff</button></span>
+    </div>
 
     <main>
       <!-- NEW ORDER -->
@@ -115,8 +145,8 @@
 
       <!-- REPORTS -->
       <section class="view" id="view-reports" hidden>
-        <div class="page-head"><h2>Reports</h2></div>
-        <div class="chips" id="periodChips">
+        <div class="page-head"><h2 id="reportsTitle">Reports</h2></div>
+        <div class="chips mgr-only" id="periodChips">
           <button data-p="today" class="active">Today</button>
           <button data-p="week">This week</button>
           <button data-p="month">This month</button>
@@ -124,7 +154,7 @@
         </div>
         <p class="muted small" id="periodLabel"></p>
         <div class="stats" id="stats"></div>
-        <div class="card">
+        <div class="card mgr-only">
           <div class="card-head"><h3 id="chartTitle">This week by day</h3>
             <div class="legend"><span><i class="sw income"></i>Income</span><span><i class="sw expense"></i>Expenses</span></div>
           </div>
@@ -133,6 +163,10 @@
         <div class="grid-2col">
           <div class="card"><div class="card-head"><h3>Items washed</h3></div><div id="itemBreakdown"></div></div>
           <div class="card"><div class="card-head"><h3>Expenses by type</h3></div><div id="expenseBreakdown"></div></div>
+        </div>
+        <div class="card mgr-only">
+          <div class="card-head"><h3>Payments taken by</h3><span class="muted small">who marked orders paid</span></div>
+          <div id="staffBreakdown"></div>
         </div>
         <div class="card">
           <div class="card-head"><h3>Right now</h3></div>
@@ -143,7 +177,7 @@
       <!-- SETTINGS -->
       <section class="view" id="view-settings" hidden>
         <div class="page-head"><h2>Settings</h2></div>
-        <form id="settingsForm" class="stack">
+        <form id="settingsForm" class="stack mgr-only">
           <div class="card grid2">
             <label>Shop name<input id="sShop" required /></label>
             <label>Currency symbol<input id="sCur" required maxlength="6" /></label>
@@ -161,10 +195,24 @@
           </div>
           <button class="btn primary" type="submit">Save settings</button>
         </form>
+        <div class="card mgr-only" id="staffCard">
+          <div class="card-head"><h3>Staff</h3><span class="muted small">Who can use this shop's app</span></div>
+          <div id="memberList" class="member-list"></div>
+          <form id="inviteForm" class="invite-form">
+            <h3>Add a person</h3>
+            <p class="muted small">They create an account with this exact email and they're in. Shop staff can take orders, mark paid / collected and add expenses. They can't see profit reports, change prices, edit or delete orders, or undo a payment.</p>
+            <div class="grid3">
+              <label>Name<input id="invName" required placeholder="e.g. Akosua" /></label>
+              <label>Email<input id="invEmail" type="email" required placeholder="akosua@gmail.com" /></label>
+              <label>Role<select id="invRole"><option value="staff">Shop staff</option><option value="manager">Manager</option></select></label>
+            </div>
+            <button class="btn primary" type="submit">Add person</button>
+          </form>
+        </div>
         <div class="card account">
           <div><div class="muted small">Signed in as</div><div id="accountEmail"></div></div>
           <div class="row">
-            <button class="btn ghost small" id="exportCsv">Export CSV</button>
+            <button class="btn ghost small mgr-only" id="exportCsv">Export CSV</button>
             <button class="btn ghost small" id="signOut">Sign out</button>
           </div>
         </div>

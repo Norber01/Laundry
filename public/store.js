@@ -1,5 +1,14 @@
 // Data layer. Uses Firebase (Auth + Firestore) when firebase-config.js is filled in,
 // otherwise a demo store that keeps everything in this browser's localStorage.
+//
+// Firestore layout:
+//   shops/{shopId}                     { ownerUid, settings }        shopId = manager's uid
+//   shops/{shopId}/members/{uid}       { role: "manager"|"staff", name, email }
+//   shops/{shopId}/invites/{email}     { role, name }                pending staff invites (for the manager's list)
+//   shops/{shopId}/orders/{id}
+//   shops/{shopId}/expenses/{id}
+//   invites/{email}                    { shopId, role, name }        lookup used when staff first sign in
+//   users/{uid}                        { shopId }
 import { firebaseConfig } from "./firebase-config.js";
 
 const FB = "https://www.gstatic.com/firebasejs/10.14.1";
@@ -8,27 +17,46 @@ export const isDemo = !firebaseConfig || !firebaseConfig.apiKey;
 /* ---------------- Demo (local) store ---------------- */
 function createLocalStore() {
   const KEY = "laundry-demo-v1";
-  const listeners = { orders: new Set(), expenses: new Set(), settings: new Set() };
+  const ROLE_KEY = "laundry-demo-role";
+  const names = { manager: "Kwame", staff: "Akosua" };
+  const listeners = { orders: new Set(), expenses: new Set(), settings: new Set(), members: new Set(), invites: new Set() };
   let db;
   try { db = JSON.parse(localStorage.getItem(KEY)) || {}; } catch { db = {}; }
-  db.orders ||= {}; db.expenses ||= {}; db.settings ||= null;
+  db.orders ||= {}; db.expenses ||= {}; db.settings ||= null; db.invites ||= {};
+  db.members ||= {
+    "demo-manager": { role: "manager", name: names.manager, email: "manager@demo", owner: true },
+    "demo-staff": { role: "staff", name: names.staff, email: "akosua@demo" },
+  };
+  let role = "manager";
+  try { role = localStorage.getItem(ROLE_KEY) || "manager"; } catch {}
 
   const save = () => { try { localStorage.setItem(KEY, JSON.stringify(db)); } catch {} };
   const emit = (name) => {
-    const val = name === "settings" ? db.settings : Object.entries(db[name]).map(([id, d]) => ({ id, ...d }));
+    const v = db[name];
+    const val = name === "settings" ? v : Object.entries(v).map(([id, d]) => ({ id, ...d }));
     listeners[name].forEach((cb) => cb(val));
   };
   const id = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+  let authCb = null;
+  const user = () => ({ uid: role === "manager" ? "demo-manager" : "demo-staff", email: role === "manager" ? "manager@demo" : "akosua@demo", displayName: names[role] });
 
   return {
     mode: "demo",
-    onAuth(cb) { setTimeout(() => cb({ uid: "demo", email: "Demo mode (this device only)" }), 0); return () => {}; },
+    onAuth(cb) { authCb = cb; setTimeout(() => cb(user()), 0); return () => {}; },
     async signIn() {}, async signUp() {}, async resetPassword() {}, async signOut() {},
+    async loadProfile() { return { status: "ok", shopId: "demo", role, name: names[role], owner: role === "manager" }; },
+    async createShop() {},
+    // Demo only: switch between the manager and staff sides.
+    switchRole(r) { role = r; try { localStorage.setItem(ROLE_KEY, r); } catch {} authCb?.(user()); },
     watch(name, cb) { listeners[name].add(cb); setTimeout(() => emit(name), 0); return () => listeners[name].delete(cb); },
     async add(name, data) { const k = id(); db[name][k] = data; save(); emit(name); return k; },
     async update(name, k, patch) { db[name][k] = { ...db[name][k], ...patch }; save(); emit(name); },
     async remove(name, k) { delete db[name][k]; save(); emit(name); },
     async saveSettings(s) { db.settings = s; save(); emit("settings"); },
+    async inviteStaff(email, name, r) { db.invites[email] = { name, role: r }; save(); emit("invites"); },
+    async cancelInvite(email) { delete db.invites[email]; save(); emit("invites"); },
+    async updateMember(uid, patch) { db.members[uid] = { ...db.members[uid], ...patch }; save(); emit("members"); },
+    async removeMember(uid) { delete db.members[uid]; save(); emit("members"); },
   };
 }
 
@@ -50,32 +78,92 @@ async function createFirebaseStore() {
   } catch {
     db = fs.getFirestore(app);
   }
-  const uid = () => a.currentUser.uid;
-  const col = (name) => fs.collection(db, "users", uid(), name);
-  const settingsDoc = () => fs.doc(db, "users", uid(), "settings", "main");
+  let shopId = null;
+  const shopRef = () => fs.doc(db, "shops", shopId);
+  const col = (name) => fs.collection(db, "shops", shopId, name);
+  const emailOf = (u) => (u.email || "").trim().toLowerCase();
 
   return {
     mode: "firebase",
     onAuth: (cb) => auth.onAuthStateChanged(a, cb),
     signIn: (e, p) => auth.signInWithEmailAndPassword(a, e, p),
-    signUp: (e, p) => auth.createUserWithEmailAndPassword(a, e, p),
+    async signUp(e, p, name) {
+      const cred = await auth.createUserWithEmailAndPassword(a, e, p);
+      if (name) await auth.updateProfile(cred.user, { displayName: name });
+    },
     resetPassword: (e) => auth.sendPasswordResetEmail(a, e),
-    signOut: () => auth.signOut(a),
+    signOut: () => { shopId = null; return auth.signOut(a); },
+
+    // Works out which shop this person belongs to and their role.
+    async loadProfile(user) {
+      const uid = user.uid, email = emailOf(user);
+      // 1) Accept a pending invite, if the manager added this email.
+      try {
+        const inv = await fs.getDoc(fs.doc(db, "invites", email));
+        if (inv.exists()) {
+          const { shopId: sid, role, name } = inv.data();
+          await fs.setDoc(fs.doc(db, "shops", sid, "members", uid), { role, name: name || user.displayName || email, email, joinedAt: Date.now() });
+          await fs.setDoc(fs.doc(db, "users", uid), { shopId: sid });
+          await Promise.all([fs.deleteDoc(inv.ref), fs.deleteDoc(fs.doc(db, "shops", sid, "invites", email))]).catch(() => {});
+        }
+      } catch (e) { console.warn("invite check", e); }
+      // 2) Look up the shop this account belongs to.
+      const u = await fs.getDoc(fs.doc(db, "users", uid));
+      if (!u.exists()) return { status: "new" };
+      const sid = u.data().shopId;
+      let m;
+      try { m = await fs.getDoc(fs.doc(db, "shops", sid, "members", uid)); } catch { return { status: "removed" }; }
+      if (!m.exists()) return { status: "removed" };
+      shopId = sid;
+      return { status: "ok", shopId: sid, role: m.data().role, name: m.data().name, owner: sid === uid };
+    },
+
+    // The first person to set up a shop becomes its manager.
+    async createShop(user, shopName, yourName, defaults) {
+      const uid = user.uid;
+      const b = fs.writeBatch(db);
+      b.set(fs.doc(db, "shops", uid), { ownerUid: uid, settings: { ...defaults, shopName }, createdAt: Date.now() });
+      b.set(fs.doc(db, "shops", uid, "members", uid), { role: "manager", name: yourName, email: emailOf(user), joinedAt: Date.now() });
+      b.set(fs.doc(db, "users", uid), { shopId: uid });
+      await b.commit();
+      if (yourName && !user.displayName) auth.updateProfile(user, { displayName: yourName }).catch(() => {});
+    },
+
     watch(name, cb) {
-      if (name === "settings") {
-        return fs.onSnapshot(settingsDoc(), (snap) => cb(snap.exists() ? snap.data() : null));
-      }
-      return fs.onSnapshot(col(name), (snap) => cb(snap.docs.map((d) => ({ id: d.id, ...d.data() }))));
+      const err = (e) => console.warn(`watch ${name}`, e);
+      if (name === "settings") return fs.onSnapshot(shopRef(), (s) => cb(s.exists() ? s.data().settings || null : null), err);
+      return fs.onSnapshot(col(name), (snap) => cb(snap.docs.map((d) => ({ id: d.id, ...d.data() }))), err);
     },
     async add(name, data) {
       const ref = fs.doc(col(name));
-      fs.setDoc(ref, data); // don't await: resolves only once the server confirms
+      fs.setDoc(ref, data).catch((e) => alertErr(e)); // don't await: resolves only once the server confirms
       return ref.id;
     },
-    async update(name, k, patch) { fs.updateDoc(fs.doc(col(name), k), patch); },
-    async remove(name, k) { fs.deleteDoc(fs.doc(col(name), k)); },
-    async saveSettings(s) { fs.setDoc(settingsDoc(), s); },
+    async update(name, k, patch) { fs.updateDoc(fs.doc(col(name), k), patch).catch((e) => alertErr(e)); },
+    async remove(name, k) { fs.deleteDoc(fs.doc(col(name), k)).catch((e) => alertErr(e)); },
+    async saveSettings(s) { fs.updateDoc(shopRef(), { settings: s }).catch((e) => alertErr(e)); },
+
+    async inviteStaff(email, name, role) {
+      email = email.trim().toLowerCase();
+      const b = fs.writeBatch(db);
+      b.set(fs.doc(db, "invites", email), { shopId, role, name, createdAt: Date.now() });
+      b.set(fs.doc(db, "shops", shopId, "invites", email), { role, name, createdAt: Date.now() });
+      await b.commit();
+    },
+    async cancelInvite(email) {
+      const b = fs.writeBatch(db);
+      b.delete(fs.doc(db, "invites", email));
+      b.delete(fs.doc(db, "shops", shopId, "invites", email));
+      await b.commit();
+    },
+    updateMember: (uid, patch) => fs.updateDoc(fs.doc(db, "shops", shopId, "members", uid), patch),
+    removeMember: (uid) => fs.deleteDoc(fs.doc(db, "shops", shopId, "members", uid)),
   };
+}
+
+function alertErr(e) {
+  console.error(e);
+  if (String(e?.code).includes("permission")) alert("You don't have permission to do that. Ask the manager.");
 }
 
 export async function createStore() {
