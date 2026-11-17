@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Laundry Book</title>
+  <meta name="theme-color" content="#0e6e8c" />
+  <link rel="manifest" href="manifest.json" />
+  <link rel="icon" href="icon.svg" type="image/svg+xml" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <!-- Loading -->
+  <div id="boot" class="boot"><div class="spinner"></div></div>
+
+  <!-- Sign in -->
+  <section id="auth" class="auth" hidden>
+    <form id="authForm" class="auth-card">
+      <img src="icon.svg" alt="" width="56" height="56" />
+      <h1>Laundry Book</h1>
+      <p class="muted">Sign in to your shop</p>
+      <label>Email<input id="authEmail" type="email" autocomplete="email" required /></label>
+      <label>Password<input id="authPass" type="password" autocomplete="current-password" minlength="6" required /></label>
+      <p id="authError" class="error" hidden></p>
+      <button class="btn primary block" type="submit" id="authSubmit">Sign in</button>
+      <button class="link" type="button" id="authToggle">New shop? Create an account</button>
+      <button class="link" type="button" id="authReset">Forgot password?</button>
+    </form>
+  </section>
+
+  <!-- App -->
+  <div id="app" class="app" hidden>
+    <header class="topbar">
+      <div class="brand"><img src="icon.svg" alt="" width="28" height="28" /><span id="shopName">Laundry Book</span></div>
+      <nav class="tabs" id="tabs">
+        <button data-view="new" class="active"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg><span>New</span></button>
+        <button data-view="orders"><svg viewBox="0 0 24 24"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2zM9 8h6M9 12h6"/></svg><span>Orders</span><b id="pendingBadge" class="badge" hidden></b></button>
+        <button data-view="expenses"><svg viewBox="0 0 24 24"><path d="M3 7h18v12H3zM3 11h18M7 15h3"/></svg><span>Expenses</span></button>
+        <button data-view="reports"><svg viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg><span>Reports</span></button>
+        <button data-view="settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg><span>Settings</span></button>
+      </nav>
+    </header>
+    <div id="demoBanner" class="demo-banner" hidden>Demo mode — data is saved on this device only. Add your Firebase config to sync across phones.</div>
+
+    <main>
+      <!-- NEW ORDER -->
+      <section class="view" id="view-new">
+        <div class="page-head">
+          <h2 id="orderFormTitle">New order</h2>
+          <span class="ticket-chip" id="orderTicket"></span>
+        </div>
+        <form id="orderForm" class="stack">
+          <div class="card grid2">
+            <label>Customer name<input id="oName" required placeholder="e.g. Kofi Mensah" autocomplete="off" list="customerList" /></label>
+            <label>Phone<input id="oPhone" type="tel" placeholder="024 000 0000" autocomplete="off" /></label>
+            <datalist id="customerList"></datalist>
+            <label>Drop-off date<input id="oDate" type="date" required /></label>
+            <label>Note<input id="oNote" placeholder="Stains, starch, delivery…" /></label>
+          </div>
+
+          <div class="card">
+            <div class="card-head"><h3>Items</h3><span class="muted small">Tap + to count</span></div>
+            <div id="itemRows" class="item-rows"></div>
+          </div>
+
+          <div class="card pay-card">
+            <label class="switch"><input type="checkbox" id="oPaid" /><span class="track"></span><span>Paid now</span></label>
+            <label id="oPaidOnWrap" hidden>Paid on<input id="oPaidOn" type="date" /></label>
+          </div>
+
+          <div class="total-bar">
+            <div><div class="muted small" id="oCount">0 items</div><div class="total" id="oTotal">0.00</div></div>
+            <div class="row">
+              <button type="button" class="btn ghost" id="oCancel" hidden>Cancel</button>
+              <button type="submit" class="btn primary" id="oSave">Save order</button>
+            </div>
+          </div>
+        </form>
+      </section>
+
+      <!-- ORDERS -->
+      <section class="view" id="view-orders" hidden>
+        <div class="page-head"><h2>Orders</h2></div>
+        <div class="toolbar">
+          <input id="search" type="search" placeholder="Search name, phone or ticket #" />
+          <div class="chips" id="orderFilters">
+            <button data-f="waiting" class="active">Not collected</button>
+            <button data-f="unpaid">Not paid</button>
+            <button data-f="today">Today</button>
+            <button data-f="collected">Collected</button>
+            <button data-f="all">All</button>
+          </div>
+        </div>
+        <div id="orderSummary" class="muted small summary-line"></div>
+        <div id="orderList" class="list"></div>
+      </section>
+
+      <!-- EXPENSES -->
+      <section class="view" id="view-expenses" hidden>
+        <div class="page-head"><h2>Expenses</h2></div>
+        <form id="expenseForm" class="card grid2">
+          <label>What for
+            <select id="eCat"></select>
+          </label>
+          <label>Amount<input id="eAmount" type="number" inputmode="decimal" step="0.01" min="0.01" required placeholder="0.00" /></label>
+          <label>Date<input id="eDate" type="date" required /></label>
+          <label>Note<input id="eNote" placeholder="Optional" /></label>
+          <button class="btn primary span2" type="submit">Add expense</button>
+        </form>
+        <div class="card-head list-head"><h3>Recent</h3><span class="muted small" id="expenseMonth"></span></div>
+        <div id="expenseList" class="list"></div>
+      </section>
+
+      <!-- REPORTS -->
+      <section class="view" id="view-reports" hidden>
+        <div class="page-head"><h2>Reports</h2></div>
+        <div class="chips" id="periodChips">
+          <button data-p="today" class="active">Today</button>
+          <button data-p="week">This week</button>
+          <button data-p="month">This month</button>
+          <button data-p="last-month">Last month</button>
+        </div>
+        <p class="muted small" id="periodLabel"></p>
+        <div class="stats" id="stats"></div>
+        <div class="card">
+          <div class="card-head"><h3 id="chartTitle">This week by day</h3>
+            <div class="legend"><span><i class="sw income"></i>Income</span><span><i class="sw expense"></i>Expenses</span></div>
+          </div>
+          <div id="chart" class="chart"></div>
+        </div>
+        <div class="grid-2col">
+          <div class="card"><div class="card-head"><h3>Items washed</h3></div><div id="itemBreakdown"></div></div>
+          <div class="card"><div class="card-head"><h3>Expenses by type</h3></div><div id="expenseBreakdown"></div></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h3>Right now</h3></div>
+          <div id="outstanding" class="outstanding"></div>
+        </div>
+      </section>
+
+      <!-- SETTINGS -->
+      <section class="view" id="view-settings" hidden>
+        <div class="page-head"><h2>Settings</h2></div>
+        <form id="settingsForm" class="stack">
+          <div class="card grid2">
+            <label>Shop name<input id="sShop" required /></label>
+            <label>Currency symbol<input id="sCur" required maxlength="6" /></label>
+            <label>Shop phone (on receipts)<input id="sPhone" type="tel" /></label>
+            <label>WhatsApp country code<input id="sCC" inputmode="numeric" placeholder="233" /></label>
+          </div>
+          <div class="card">
+            <div class="card-head"><h3>Price list</h3><button type="button" class="btn small ghost" id="addItemType">+ Add item</button></div>
+            <p class="muted small">Price changes apply to new orders. Old orders keep the price they were charged.</p>
+            <div id="priceRows" class="price-rows"></div>
+          </div>
+          <div class="card">
+            <div class="card-head"><h3>Expense types</h3></div>
+            <label>One per line<textarea id="sExpCats" rows="5"></textarea></label>
+          </div>
+          <button class="btn primary" type="submit">Save settings</button>
+        </form>
+        <div class="card account">
+          <div><div class="muted small">Signed in as</div><div id="accountEmail"></div></div>
+          <div class="row">
+            <button class="btn ghost small" id="exportCsv">Export CSV</button>
+            <button class="btn ghost small" id="signOut">Sign out</button>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Dialog for marking paid / collected with a date -->
+  <dialog id="dateDialog">
+    <form method="dialog" class="dialog-body">
+      <h3 id="dateDialogTitle">Mark as paid</h3>
+      <p class="muted small" id="dateDialogText"></p>
+      <label>Date<input type="date" id="dateDialogInput" required /></label>
+      <div class="row end">
+        <button value="cancel" class="btn ghost" formnovalidate>Cancel</button>
+        <button value="ok" class="btn primary" id="dateDialogOk">Confirm</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
