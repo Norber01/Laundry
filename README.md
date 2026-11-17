@@ -40,7 +40,19 @@ While `public/firebase-config.js` is empty, the app runs in demo mode and saves 
 cd public && python3 -m http.server 8080   # then open http://localhost:8080
 ```
 
-## Put it on Firebase
+## Publish from a phone (no computer needed)
+
+The app is published by GitHub Pages (see `.github/workflows/pages.yml`). Firebase only provides login and the database.
+
+1. **Firebase console** (console.firebase.google.com): create a project, then:
+   - Authentication → Get started → Email/Password → Enable.
+   - Firestore Database → Create database → production mode.
+   - Firestore Database → **Rules** tab → replace everything with the contents of `firestore.rules` → Publish.
+   - Project settings → Your apps → Web (`</>`) → register → copy the config into `public/firebase-config.js`.
+2. **GitHub**: Settings → Pages → Source: **GitHub Actions**.
+3. Push or merge to `main`. The app appears at `https://<user>.github.io/Laundry/` a minute later.
+
+## Put it on Firebase Hosting (from a computer)
 
 1. In the [Firebase console](https://console.firebase.google.com), create a project.
 2. **Build → Authentication → Get started** and enable **Email/Password**.
