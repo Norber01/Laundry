@@ -249,8 +249,8 @@ main { max-width: 860px; margin: 0 auto; padding: 20px 20px 120px; }
 .tip span { margin-left: auto; padding-left: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .tip-net { border-top: 1px solid var(--border); padding-top: 3px; margin-top: 2px; }
 
-.barlist { display: grid; gap: 8px; }
-.bl-row { display: grid; grid-template-columns: minmax(80px, 34%) 1fr auto; align-items: center; gap: 10px; font-size: 14px; }
+.barlist { display: grid; grid-template-columns: minmax(80px, 34%) 1fr auto; align-items: center; gap: 8px 10px; font-size: 14px; }
+.bl-row { display: contents; }
 .bl-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); }
 .bl-track { height: 10px; background: var(--surface-2); border-radius: 999px; overflow: hidden; }
 .bl-track i { display: block; height: 100%; background: var(--brand); border-radius: 999px; }
@@ -288,7 +288,8 @@ dialog::backdrop { background: rgba(10, 20, 30, .45); }
 
 /* Phone layout: bottom tab bar */
 @media (max-width: 720px) {
-  .topbar { padding: 10px 16px; padding-top: max(10px, env(safe-area-inset-top)); }
+  /* no backdrop-filter here: it would trap the fixed bottom tab bar inside the header */
+  .topbar { padding: 10px 16px; padding-top: max(10px, env(safe-area-inset-top)); backdrop-filter: none; -webkit-backdrop-filter: none; background: var(--surface); }
   .tabs {
     position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; justify-content: space-around; gap: 0;
     background: var(--surface); border-top: 1px solid var(--border); padding: 4px 4px max(4px, env(safe-area-inset-bottom));
