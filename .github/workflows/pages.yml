@@ -4,7 +4,7 @@ name: Publish app
 
 on:
   push:
-    branches: [main]
+    branches: [main, claude/laundry-management-app-ngtioj]
   workflow_dispatch:
 
 permissions:
