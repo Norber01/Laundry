@@ -13,9 +13,15 @@ service cloud.firestore {
     // They cannot change items, totals, or undo a payment.
     function staffOrderUpdateOk() {
       let changed = request.resource.data.diff(resource.data).affectedKeys();
+      // (so staff cannot add or change a discount after the order is saved)
       return changed.hasOnly(['paid', 'paidOn', 'paidBy', 'paidByUid', 'collected', 'collectedOn', 'collectedBy', 'collectedByUid'])
         && (!changed.hasAny(['paid']) || (resource.data.paid == false && request.resource.data.paid == true))
         && (!changed.hasAny(['collected']) || (resource.data.collected == false && request.resource.data.collected == true));
+    }
+
+    function validDiscount() {
+      let d = request.resource.data;
+      return !('discount' in d) || (d.discount is number && d.discount >= 0 && d.discount <= d.subtotal);
     }
 
     match /users/{uid} {
@@ -53,8 +59,10 @@ service cloud.firestore {
       }
 
       match /orders/{id} {
-        allow read, create: if isMember(shop);
-        allow update: if isManager(shop) || (isMember(shop) && staffOrderUpdateOk());
+        allow read: if isMember(shop);
+        // A discount can't be negative or bigger than the bill.
+        allow create: if isMember(shop) && validDiscount();
+        allow update: if (isManager(shop) && validDiscount()) || (isMember(shop) && staffOrderUpdateOk());
         allow delete: if isManager(shop);
       }
 

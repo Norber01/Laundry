@@ -48,6 +48,8 @@ const moneyShort = (v) => `${settings.currency} ${num(v).toLocaleString(undefine
 const pad = (n) => String(n).padStart(2, "0");
 const iso = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 const today = () => iso(new Date());
+const subtotalOf = (o) => num(o.subtotal ?? o.total);
+const discountOf = (o) => num(o.discount);
 const me = () => ({ name: profile?.name || "", uid: currentUser?.uid || "" });
 const parseISO = (s) => { const [y, m, d] = s.split("-").map(Number); return new Date(y, m - 1, d); };
 const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
@@ -308,7 +310,19 @@ function updateTotal() {
   const items = formItems();
   let count = 0, total = 0;
   items.forEach((it) => { const q = qty[it.id] || 0; count += q; total += q * it.price; });
-  $("#oTotal").textContent = money(total);
+  const disc = Math.max(0, num($("#oDiscount").value));
+  const tooBig = disc > total;
+  $("#oDiscount").setCustomValidity(tooBig ? "The discount can't be more than the bill" : "");
+  const pays = Math.max(0, total - disc);
+  $("#oTotal").textContent = money(pays);
+  $("#oDiscNote").hidden = !disc;
+  $("#oDiscNote").textContent = disc ? `after ${money(disc)} off` : "";
+  $("#oBill").hidden = !disc;
+  $("#oBill").classList.toggle("bad", tooBig);
+  $("#oSubtotal").textContent = money(total);
+  $("#oDiscShow").textContent = `− ${money(disc)}`;
+  $("#oPays").textContent = tooBig ? "Discount too big" : money(pays);
+  $("#oDiscCur").textContent = settings.currency;
   $("#oCount").textContent = `${count} item${count === 1 ? "" : "s"}`;
   $$("#itemRows .item-row").forEach((row) => {
     const it = items.find((x) => x.id === row.dataset.id); const q = qty[it.id] || 0;
@@ -316,6 +330,9 @@ function updateTotal() {
     $(".line-total", row).textContent = q ? money(q * it.price) : "";
   });
 }
+
+$("#oDiscount").addEventListener("input", updateTotal);
+$("#oDiscount").addEventListener("focus", (e) => e.target.select());
 
 $("#itemRows").addEventListener("click", (e) => {
   const row = e.target.closest(".item-row"); if (!row) return;
@@ -365,6 +382,7 @@ function startEdit(o) {
   $("#oPhone").value = o.phone || "";
   $("#oDate").value = o.dropDate || today();
   $("#oNote").value = o.note || "";
+  $("#oDiscount").value = discountOf(o) || "";
   $("#oPaid").checked = !!o.paid;
   $("#oPaidOn").value = o.paidOn || today();
   $("#oPaidOnWrap").hidden = !o.paid;
@@ -380,7 +398,10 @@ $("#orderForm").onsubmit = async (e) => {
   e.preventDefault();
   const lines = formItems().filter((it) => qty[it.id] > 0).map((it) => ({ id: it.id, name: it.name, price: it.price, qty: qty[it.id] }));
   if (!lines.length) return toast("Add at least one item");
-  const total = lines.reduce((s, l) => s + l.qty * l.price, 0);
+  const subtotal = Math.round(lines.reduce((s, l) => s + l.qty * l.price, 0) * 100) / 100;
+  const discount = Math.round(Math.max(0, num($("#oDiscount").value)) * 100) / 100;
+  if (discount > subtotal) return toast("The discount can't be more than the bill");
+  const total = subtotal - discount;
   const paid = $("#oPaid").checked;
   const data = {
     customer: $("#oName").value.trim(),
@@ -388,6 +409,8 @@ $("#orderForm").onsubmit = async (e) => {
     dropDate: $("#oDate").value,
     note: $("#oNote").value.trim(),
     lines,
+    subtotal,
+    discount,
     total: Math.round(total * 100) / 100,
     itemCount: lines.reduce((s, l) => s + l.qty, 0),
     paid,
@@ -398,12 +421,14 @@ $("#orderForm").onsubmit = async (e) => {
     const before = orders.find((o) => o.id === editingId);
     if (data.paid && !before?.paid) { data.paidBy = me().name; data.paidByUid = me().uid; }
     if (!data.paid) { data.paidBy = null; data.paidByUid = null; }
+    if (discount !== discountOf(before || {})) { data.discountBy = discount ? me().name : null; }
     await store.update("orders", editingId, data);
     toast("Order updated");
   } else {
     data.ticket = nextTicket();
     data.createdAt = Date.now();
     data.createdBy = me().name; data.createdByUid = me().uid;
+    if (discount) data.discountBy = me().name;
     if (data.paid) { data.paidBy = me().name; data.paidByUid = me().uid; }
     data.collected = false;
     data.collectedOn = null;
@@ -458,7 +483,7 @@ function renderOrders() {
           <div class="order-title"><span class="tno">${ticketStr(o.ticket)}</span> ${esc(o.customer)}</div>
           <div class="muted small">${o.phone ? `${esc(o.phone)} · ` : ""}Dropped ${fmtDate(o.dropDate)}</div>
         </div>
-        <div class="order-total">${money(o.total)}</div>
+        <div class="order-total">${money(o.total)}${discountOf(o) ? `<div class="was">${money(discountOf(o))} off</div>` : ""}</div>
       </div>
       <div class="order-items">${items}${o.note ? `<div class="note">“${esc(o.note)}”</div>` : ""}</div>
       <div class="status-row">
@@ -534,6 +559,7 @@ function receiptText(o) {
     "",
     lines,
     "",
+    ...(discountOf(o) ? [`Subtotal: ${money(subtotalOf(o))}`, `Discount: −${money(discountOf(o))}`] : []),
     `*Total: ${money(o.total)}*`,
     o.paid ? `Paid ${fmtDate(o.paidOn)} ✓` : "Not paid yet",
     o.collected ? `Collected ${fmtDate(o.collectedOn)}` : "Please bring this ticket number when collecting.",
@@ -560,11 +586,12 @@ function printReceipt(o) {
   w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Receipt ${ticketStr(o.ticket)}</title>
   <style>body{font:14px/1.45 system-ui,sans-serif;max-width:300px;margin:16px auto;color:#000}h1{font-size:18px;margin:0;text-align:center}
   .c{text-align:center}.big{font-size:28px;font-weight:700;text-align:center;margin:6px 0}table{width:100%;border-collapse:collapse;margin:10px 0}
-  td{padding:3px 0;border-bottom:1px dashed #999}td:last-child{text-align:right}.tot td{font-weight:700;border:0;padding-top:8px}</style></head><body>
+  td{padding:3px 0;border-bottom:1px dashed #999}td:last-child{text-align:right}.tot td{font-weight:700;border:0;padding-top:8px}.sub td{border:0;padding-top:6px}</style></head><body>
   <h1>${esc(settings.shopName)}</h1>${settings.shopPhone ? `<div class="c">${esc(settings.shopPhone)}</div>` : ""}
   <div class="big">${ticketStr(o.ticket)}</div>
   <div class="c">${esc(o.customer)}${o.phone ? ` · ${esc(o.phone)}` : ""}<br>Dropped ${esc(parseISO(o.dropDate).toLocaleDateString())}</div>
   <table>${(o.lines || []).map((l) => `<tr><td>${l.qty} × ${esc(l.name)}</td><td>${money(l.qty * l.price)}</td></tr>`).join("")}
+  ${discountOf(o) ? `<tr class="sub"><td>Subtotal</td><td>${money(subtotalOf(o))}</td></tr><tr class="sub"><td>Discount</td><td>−${money(discountOf(o))}</td></tr>` : ""}
   <tr class="tot"><td>Total</td><td>${money(o.total)}</td></tr></table>
   <div class="c">${o.paid ? `PAID ${esc(parseISO(o.paidOn).toLocaleDateString())}` : "NOT PAID"}</div>
   <p class="c">Thank you!</p><script>window.onload=()=>{window.print()}<\/script></body></html>`);
@@ -636,6 +663,8 @@ function renderReports() {
   const dropped = orders.filter((o) => inRange(o.dropDate, r));
   const itemsIn = dropped.reduce((s, o) => s + num(o.itemCount), 0);
   const billed = dropped.reduce((s, o) => s + num(o.total), 0);
+  const discounted = dropped.filter((o) => discountOf(o) > 0);
+  const discTotal = discounted.reduce((s, o) => s + discountOf(o), 0);
 
   $("#stats").innerHTML = `
     <div class="stat"><div class="label">Money in</div><div class="value">${money(income)}</div><div class="sub">${paidOrders.length} payment${paidOrders.length === 1 ? "" : "s"}</div></div>
@@ -643,7 +672,7 @@ function renderReports() {
     ${isManager
       ? `<div class="stat hero ${profit < 0 ? "neg" : ""}"><div class="label">${profit < 0 ? "Loss" : "Profit"}</div><div class="value">${money(Math.abs(profit))}</div><div class="sub">money in − expenses</div></div>`
       : `<div class="stat hero ${profit < 0 ? "neg" : ""}"><div class="label">Cash in hand</div><div class="value">${profit < 0 ? "−" : ""}${money(Math.abs(profit))}</div><div class="sub">money in − expenses today</div></div>`}
-    <div class="stat"><div class="label">Orders taken</div><div class="value">${dropped.length}</div><div class="sub">${itemsIn} items · ${moneyShort(billed)} billed</div></div>`;
+    <div class="stat"><div class="label">Orders taken</div><div class="value">${dropped.length}</div><div class="sub">${itemsIn} items · ${moneyShort(billed)} billed${discTotal ? `<br>${moneyShort(discTotal)} discount on ${discounted.length} order${discounted.length === 1 ? "" : "s"}` : ""}</div></div>`;
 
   // Chart: day-by-day for week / month views; "today" shows the current week.
   let days = [];
@@ -763,9 +792,9 @@ $$("#tabs button").forEach((b) => b.addEventListener("click", () => { if (b.data
 /* ================= CSV export ================= */
 $("#exportCsv").onclick = () => {
   const q = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
-  const rows = [["Type", "Ticket", "Customer", "Phone", "Drop-off", "Items", "Total", "Paid on", "Collected on", "Category", "Amount", "Date", "Note"]];
-  orders.forEach((o) => rows.push(["Order", o.ticket, o.customer, o.phone, o.dropDate, (o.lines || []).map((l) => `${l.qty} ${l.name}`).join("; "), o.total, o.paidOn || "", o.collectedOn || "", "", "", "", o.note]));
-  expenses.forEach((x) => rows.push(["Expense", "", "", "", "", "", "", "", "", x.category, x.amount, x.date, x.note]));
+  const rows = [["Type", "Ticket", "Customer", "Phone", "Drop-off", "Items", "Subtotal", "Discount", "Total", "Paid on", "Collected on", "Category", "Amount", "Date", "Note"]];
+  orders.forEach((o) => rows.push(["Order", o.ticket, o.customer, o.phone, o.dropDate, (o.lines || []).map((l) => `${l.qty} ${l.name}`).join("; "), subtotalOf(o), discountOf(o), o.total, o.paidOn || "", o.collectedOn || "", "", "", "", o.note]));
+  expenses.forEach((x) => rows.push(["Expense", "", "", "", "", "", "", "", "", "", "", x.category, x.amount, x.date, x.note]));
   const blob = new Blob([rows.map((r) => r.map(q).join(",")).join("\n")], { type: "text/csv" });
   const a = Object.assign(document.createElement("a"), { href: URL.createObjectURL(blob), download: `laundry-${today()}.csv` });
   a.click(); URL.revokeObjectURL(a.href);

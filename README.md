@@ -8,6 +8,8 @@ A simple laundry shop manager that runs on Firebase. It works on phones and comp
 - **Reports**: Today, This week, This month and Last month. Each shows money in, expenses, profit, a day-by-day income vs expenses chart, items washed, and how much is still owed or waiting for pickup.
 - **Settings**: shop name, currency, price list (add or remove item types) and expense types. Changing a price only affects new orders. You can also export everything to CSV.
 
+**Discounts:** type an amount in the *Discount* box on a new order (for example 20 off a 100 bill). The customer pays 80. The order card, the WhatsApp receipt and the printed receipt show the subtotal, the discount and the total. Reports show the total discount given. Only the manager can change a discount after the order is saved.
+
 "Money in" counts an order on the day it was **paid**, not the day it was dropped off.
 
 ## Manager and shop staff
@@ -85,5 +87,5 @@ users/{uid}                     shopId
 
 ```bash
 npm install
-npm run test:rules     # starts the Firestore emulator (needs Java) and runs 41 permission checks
+npm run test:rules     # starts the Firestore emulator (needs Java) and runs 48 permission checks
 ```

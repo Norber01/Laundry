@@ -95,13 +95,24 @@
             <div id="itemRows" class="item-rows"></div>
           </div>
 
+          <div class="card discount-card">
+            <label>Discount
+              <div class="money-input"><span id="oDiscCur">GH₵</span><input id="oDiscount" type="number" inputmode="decimal" step="0.01" min="0" placeholder="0.00" /></div>
+            </label>
+            <div class="bill" id="oBill" hidden>
+              <div><span>Subtotal</span><span id="oSubtotal"></span></div>
+              <div class="disc"><span>Discount</span><span id="oDiscShow"></span></div>
+              <div class="pay"><span>Customer pays</span><span id="oPays"></span></div>
+            </div>
+          </div>
+
           <div class="card pay-card">
             <label class="switch"><input type="checkbox" id="oPaid" /><span class="track"></span><span>Paid now</span></label>
             <label id="oPaidOnWrap" hidden>Paid on<input id="oPaidOn" type="date" /></label>
           </div>
 
           <div class="total-bar">
-            <div><div class="muted small" id="oCount">0 items</div><div class="total" id="oTotal">0.00</div></div>
+            <div><div class="muted small" id="oCount">0 items</div><div class="total" id="oTotal">0.00</div><div class="muted small" id="oDiscNote" hidden></div></div>
             <div class="row">
               <button type="button" class="btn ghost" id="oCancel" hidden>Cancel</button>
               <button type="submit" class="btn primary" id="oSave">Save order</button>

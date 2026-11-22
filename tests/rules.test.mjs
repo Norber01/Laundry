@@ -60,6 +60,16 @@ await t("manager undoes paid", assertSucceeds(updateDoc(doc(mgr, "shops", M, "or
 await t("manager edits total", assertSucceeds(updateDoc(doc(mgr, "shops", M, "orders", "o1"), { total: 60 })));
 await t("manager deletes order", assertSucceeds(deleteDoc(doc(mgr, "shops", M, "orders", "o1"))));
 
+// Discounts
+const disc = { ...order, subtotal: 100, discount: 20, total: 80 };
+await t("staff creates order with 20 off 100", assertSucceeds(setDoc(doc(staff, "shops", M, "orders", "d1"), disc)));
+await t("discount bigger than the bill is refused", assertFails(setDoc(doc(staff, "shops", M, "orders", "d2"), { ...disc, discount: 150 })));
+await t("negative discount is refused", assertFails(setDoc(doc(staff, "shops", M, "orders", "d3"), { ...disc, discount: -5 })));
+await t("staff cannot change a discount later", assertFails(updateDoc(doc(staff, "shops", M, "orders", "d1"), { discount: 50, total: 50 })));
+await t("staff can still mark a discounted order paid", assertSucceeds(updateDoc(doc(staff, "shops", M, "orders", "d1"), { paid: true, paidOn: "2026-11-22" })));
+await t("manager can change a discount", assertSucceeds(updateDoc(doc(mgr, "shops", M, "orders", "d1"), { discount: 10, total: 90 })));
+await t("manager cannot set discount above bill", assertFails(updateDoc(doc(mgr, "shops", M, "orders", "d1"), { discount: 120 })));
+
 // Expenses
 await t("staff adds expense", assertSucceeds(setDoc(doc(staff, "shops", M, "expenses", "e1"), { amount: 20, category: "Soap" })));
 await t("staff cannot edit expense", assertFails(updateDoc(doc(staff, "shops", M, "expenses", "e1"), { amount: 2 })));
