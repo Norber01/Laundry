@@ -70,6 +70,21 @@ await t("staff can still mark a discounted order paid", assertSucceeds(updateDoc
 await t("manager can change a discount", assertSucceeds(updateDoc(doc(mgr, "shops", M, "orders", "d1"), { discount: 10, total: 90 })));
 await t("manager cannot set discount above bill", assertFails(updateDoc(doc(mgr, "shops", M, "orders", "d1"), { discount: 120 })));
 
+// Part payments
+const po = { ...order, subtotal: 100, discount: 0, total: 100, payments: [] };
+const p1 = { amount: 50, date: "2026-11-20", by: "Akosua", byUid: S };
+const p2 = { amount: 50, date: "2026-11-22", by: "Akosua", byUid: S };
+await t("staff creates order with no payment", assertSucceeds(setDoc(doc(staff, "shops", M, "orders", "p1"), po)));
+await t("staff adds a part payment", assertSucceeds(updateDoc(doc(staff, "shops", M, "orders", "p1"), { payments: [p1] })));
+await t("staff cannot change an earlier payment", assertFails(updateDoc(doc(staff, "shops", M, "orders", "p1"), { payments: [{ ...p1, amount: 10 }] })));
+await t("staff cannot remove a payment", assertFails(updateDoc(doc(staff, "shops", M, "orders", "p1"), { payments: [] })));
+await t("staff cannot add two payments at once", assertFails(updateDoc(doc(staff, "shops", M, "orders", "p1"), { payments: [p1, p2, p2] })));
+await t("staff cannot add a zero payment", assertFails(updateDoc(doc(staff, "shops", M, "orders", "p1"), { payments: [p1, { ...p2, amount: 0 }] })));
+await t("staff cannot add a payment bigger than the bill", assertFails(updateDoc(doc(staff, "shops", M, "orders", "p1"), { payments: [p1, { ...p2, amount: 500 }] })));
+await t("staff pays the balance and marks paid", assertSucceeds(updateDoc(doc(staff, "shops", M, "orders", "p1"), { payments: [p1, p2], paid: true, paidOn: "2026-11-22", paidBy: "Akosua", paidByUid: S })));
+await t("manager removes last payment", assertSucceeds(updateDoc(doc(mgr, "shops", M, "orders", "p1"), { payments: [p1], paid: false, paidOn: null })));
+await t("staff adds first payment to an older order with no payment list", assertSucceeds(updateDoc(doc(staff, "shops", M, "orders", "d1"), { payments: [p1] })));
+
 // Expenses
 await t("staff adds expense", assertSucceeds(setDoc(doc(staff, "shops", M, "expenses", "e1"), { amount: 20, category: "Soap" })));
 await t("staff cannot edit expense", assertFails(updateDoc(doc(staff, "shops", M, "expenses", "e1"), { amount: 2 })));

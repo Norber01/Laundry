@@ -9,14 +9,25 @@ service cloud.firestore {
     function isManager(shop) { return isMember(shop) && get(memberPath(shop)).data.role == 'manager'; }
     function invitePath() { return /databases/$(database)/documents/invites/$(myEmail()); }
 
-    // Staff may only move an order forward: not paid -> paid, not collected -> collected.
-    // They cannot change items, totals, or undo a payment.
+    // Staff may only move an order forward: add a payment, not paid -> paid, not collected -> collected.
+    // They cannot change items, totals or discounts, or remove / change an earlier payment.
     function staffOrderUpdateOk() {
       let changed = request.resource.data.diff(resource.data).affectedKeys();
-      // (so staff cannot add or change a discount after the order is saved)
-      return changed.hasOnly(['paid', 'paidOn', 'paidBy', 'paidByUid', 'collected', 'collectedOn', 'collectedBy', 'collectedByUid'])
+      return changed.hasOnly(['payments', 'paid', 'paidOn', 'paidBy', 'paidByUid', 'collected', 'collectedOn', 'collectedBy', 'collectedByUid'])
         && (!changed.hasAny(['paid']) || (resource.data.paid == false && request.resource.data.paid == true))
-        && (!changed.hasAny(['collected']) || (resource.data.collected == false && request.resource.data.collected == true));
+        && (!changed.hasAny(['collected']) || (resource.data.collected == false && request.resource.data.collected == true))
+        && (!changed.hasAny(['payments']) || paymentAppended());
+    }
+
+    // Exactly one new payment added to the end; earlier payments untouched; amount > 0 and not above the bill.
+    function paymentAppended() {
+      let before = resource.data.get('payments', []);
+      let after = request.resource.data.payments;
+      let added = after[after.size() - 1];
+      return after is list
+        && after.size() == before.size() + 1
+        && after.hasAll(before)
+        && added.amount is number && added.amount > 0 && added.amount <= request.resource.data.total;
     }
 
     function validDiscount() {

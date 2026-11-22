@@ -378,3 +378,20 @@ body.staff .role-chip { color: var(--warn); background: var(--warn-bg); }
 @media (max-width: 720px) { .discount-card { grid-template-columns: 1fr; gap: 10px; } }
 .total-bar .btn { white-space: nowrap; }
 .order-total .was { white-space: nowrap; }
+
+/* ---- Part payments ---- */
+.pay-card { display: grid; gap: 12px; }
+.pay-entry { display: grid; grid-template-columns: minmax(160px, 220px) auto 1fr; gap: 12px; align-items: end; }
+.pay-quick { display: flex; gap: 6px; flex-wrap: wrap; }
+.pay-quick .btn.on { background: var(--brand-soft); color: var(--brand); border-color: transparent; }
+.pay-note { font-size: 14px; color: var(--text-2); }
+.pay-note:empty { display: none; }
+.pay-note.ok { color: var(--ok); font-weight: 600; }
+.pay-note.part { color: var(--warn); }
+.pay-note.bad { color: var(--alert); font-weight: 600; }
+.pill.part { color: var(--warn); background: var(--warn-bg); }
+.menu-note b { display: block; color: var(--text-2); margin-bottom: 2px; }
+#dateDialog .pay-quick { margin-top: -6px; }
+@media (max-width: 720px) { .pay-entry { grid-template-columns: 1fr; } }
+.order-actions .btn.small { padding: 6px 10px; }
+.order-actions .btn.share, .more summary { width: 38px; padding: 0; }

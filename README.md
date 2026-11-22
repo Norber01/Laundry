@@ -10,7 +10,9 @@ A simple laundry shop manager that runs on Firebase. It works on phones and comp
 
 **Discounts:** type an amount in the *Discount* box on a new order (for example 20 off a 100 bill). The customer pays 80. The order card, the WhatsApp receipt and the printed receipt show the subtotal, the discount and the total. Reports show the total discount given. Only the manager can change a discount after the order is saved.
 
-"Money in" counts an order on the day it was **paid**, not the day it was dropped off.
+**Part payments:** on a new order, type what the customer pays now in *Amount paid now* (or tap *Paid in full* / *Not paid*). An order that still has money owing shows **Owes GH₵ …** and a **Take balance** button. Tap it when the customer brings the rest. An order can take any number of payments, and the ⋯ menu lists each one with its date and who took it. The **Owing** filter lists everyone with a balance. Receipts show *Paid so far* and *Balance to pay*. Staff can add payments but can't remove or change one; the manager can *Undo last payment*.
+
+"Money in" counts each payment on the day it was **received**, not the day the clothes were dropped off. So GH₵ 60 paid on Monday and the GH₵ 40 balance paid on Friday show up on those two days.
 
 ## Manager and shop staff
 

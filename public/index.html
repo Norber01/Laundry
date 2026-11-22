@@ -107,8 +107,17 @@
           </div>
 
           <div class="card pay-card">
-            <label class="switch"><input type="checkbox" id="oPaid" /><span class="track"></span><span>Paid now</span></label>
-            <label id="oPaidOnWrap" hidden>Paid on<input id="oPaidOn" type="date" /></label>
+            <div id="oPayEntry" class="pay-entry">
+              <label>Amount paid now
+                <div class="money-input"><span class="cur-sym">GH₵</span><input id="oPaidAmt" type="number" inputmode="decimal" step="0.01" min="0" placeholder="0.00" /></div>
+              </label>
+              <div class="pay-quick">
+                <button type="button" class="btn small ghost" id="oPayFull">Paid in full</button>
+                <button type="button" class="btn small ghost" id="oPayNone">Not paid</button>
+              </div>
+              <label id="oPaidOnWrap" hidden>Paid on<input id="oPaidOn" type="date" /></label>
+            </div>
+            <div id="oPayNote" class="pay-note"></div>
           </div>
 
           <div class="total-bar">
@@ -128,7 +137,7 @@
           <input id="search" type="search" placeholder="Search name, phone or ticket #" />
           <div class="chips" id="orderFilters">
             <button data-f="waiting" class="active">Not collected</button>
-            <button data-f="unpaid">Not paid</button>
+            <button data-f="unpaid">Owing</button>
             <button data-f="today">Today</button>
             <button data-f="collected">Collected</button>
             <button data-f="all">All</button>
@@ -236,6 +245,10 @@
     <form method="dialog" class="dialog-body">
       <h3 id="dateDialogTitle">Mark as paid</h3>
       <p class="muted small" id="dateDialogText"></p>
+      <label id="dateDialogAmtWrap" hidden>Amount paid
+        <div class="money-input"><span class="cur-sym">GH₵</span><input type="number" id="dateDialogAmt" inputmode="decimal" step="0.01" min="0.01" /></div>
+      </label>
+      <div class="pay-quick" id="dateDialogQuick" hidden></div>
       <label>Date<input type="date" id="dateDialogInput" required /></label>
       <div class="row end">
         <button value="cancel" class="btn ghost" formnovalidate>Cancel</button>

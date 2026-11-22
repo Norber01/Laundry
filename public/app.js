@@ -50,6 +50,22 @@ const iso = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate(
 const today = () => iso(new Date());
 const subtotalOf = (o) => num(o.subtotal ?? o.total);
 const discountOf = (o) => num(o.discount);
+const r2 = (v) => Math.round(num(v) * 100) / 100;
+// All payments on an order, oldest first. Orders saved before part payments existed have no
+// list: a paid one counts as a single full payment on the day it was marked paid.
+const paymentsOf = (o) => Array.isArray(o.payments) ? o.payments
+  : o.paid ? [{ amount: num(o.total), date: o.paidOn, by: o.paidBy || "", byUid: o.paidByUid || "" }] : [];
+const paidSoFar = (o) => r2(paymentsOf(o).reduce((s, p) => s + num(p.amount), 0));
+const balanceOf = (o) => Math.max(0, r2(num(o.total) - paidSoFar(o)));
+const fullyPaid = (o) => balanceOf(o) <= 0 && (paidSoFar(o) > 0 || num(o.total) <= 0);
+const allPayments = () => orders.flatMap((o) => paymentsOf(o).map((p) => ({ ...p, order: o })));
+// Fields to save whenever an order's payment list changes.
+function paymentFields(total, payments) {
+  const sum = r2(payments.reduce((s, p) => s + num(p.amount), 0));
+  const last = payments[payments.length - 1];
+  const full = (payments.length > 0 && sum >= r2(total)) || num(total) <= 0;
+  return { payments, paid: full, paidOn: full && last ? last.date : null, paidBy: full && last ? last.by : null, paidByUid: full && last ? last.byUid : null };
+}
 const me = () => ({ name: profile?.name || "", uid: currentUser?.uid || "" });
 const parseISO = (s) => { const [y, m, d] = s.split("-").map(Number); return new Date(y, m - 1, d); };
 const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
@@ -75,17 +91,40 @@ function toast(msg) {
   toast._t = setTimeout(() => { t.classList.remove("show"); setTimeout(() => (t.hidden = true), 250); }, 2200);
 }
 
-function askDate(title, text, initial = today()) {
+function askDate(title, text, initial = today(), balance = null) {
   const dlg = $("#dateDialog");
+  const withAmt = balance !== null;
   $("#dateDialogTitle").textContent = title;
   $("#dateDialogText").textContent = text;
   $("#dateDialogInput").value = initial;
   $("#dateDialogInput").max = today();
+  $("#dateDialogAmtWrap").hidden = !withAmt;
+  $("#dateDialogQuick").hidden = !withAmt;
+  const amt = $("#dateDialogAmt");
+  amt.required = withAmt;
+  if (withAmt) {
+    amt.value = balance;
+    amt.max = balance;
+    $$(".cur-sym").forEach((x) => (x.textContent = settings.currency));
+    $("#dateDialogQuick").innerHTML = `<button type="button" class="btn small ghost" data-amt="${balance}">Full balance ${money(balance)}</button>`;
+  }
   dlg.showModal();
+  if (withAmt) { amt.focus(); amt.select(); }
   return new Promise((resolve) => {
-    dlg.addEventListener("close", () => resolve(dlg.returnValue === "ok" ? $("#dateDialogInput").value : null), { once: true });
+    dlg.addEventListener("close", () => {
+      if (dlg.returnValue !== "ok") return resolve(null);
+      const date = $("#dateDialogInput").value;
+      resolve(withAmt ? { amount: r2(amt.value), date } : date);
+    }, { once: true });
   });
 }
+$("#dateDialogQuick").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-amt]"); if (b) $("#dateDialogAmt").value = b.dataset.amt;
+});
+$("#dateDialogAmt").addEventListener("input", (e) => {
+  const v = num(e.target.value), max = num(e.target.max);
+  e.target.setCustomValidity(v > max ? `That's more than the balance (${money(max)})` : v <= 0 ? "Enter the amount paid" : "");
+});
 
 /* ================= Boot & auth ================= */
 async function boot() {
@@ -323,6 +362,7 @@ function updateTotal() {
   $("#oDiscShow").textContent = `− ${money(disc)}`;
   $("#oPays").textContent = tooBig ? "Discount too big" : money(pays);
   $("#oDiscCur").textContent = settings.currency;
+  updatePayNote(pays);
   $("#oCount").textContent = `${count} item${count === 1 ? "" : "s"}`;
   $$("#itemRows .item-row").forEach((row) => {
     const it = items.find((x) => x.id === row.dataset.id); const q = qty[it.id] || 0;
@@ -332,6 +372,38 @@ function updateTotal() {
 }
 
 $("#oDiscount").addEventListener("input", updateTotal);
+
+// "Amount paid now" on the order form. payFull keeps it equal to the bill while items change.
+let payFull = false;
+function updatePayNote(bill) {
+  const box = $("#oPayNote"), amtIn = $("#oPaidAmt");
+  $$(".cur-sym").forEach((x) => (x.textContent = settings.currency));
+  if (editingId) {
+    const o = orders.find((x) => x.id === editingId) || {};
+    const pd = paidSoFar(o), bal = Math.max(0, r2(bill - pd));
+    box.className = "pay-note";
+    box.innerHTML = pd > 0
+      ? `Paid so far <b>${money(pd)}</b> · ${bal > 0 ? `balance <b>${money(bal)}</b>` : "fully paid"}<div class="muted small">Use <b>Take payment</b> on the order to add a payment.</div>`
+      : `Not paid yet<div class="muted small">Use <b>Take payment</b> on the order when the customer pays.</div>`;
+    return;
+  }
+  if (payFull) amtIn.value = bill > 0 ? r2(bill) : "";
+  const paid = r2(amtIn.value);
+  amtIn.setCustomValidity(paid > r2(bill) ? "That's more than the bill" : "");
+  $("#oPaidOnWrap").hidden = !(paid > 0);
+  $("#oPayFull").classList.toggle("on", payFull);
+  $("#oPayNone").classList.toggle("on", !paid);
+  if (!bill) { box.className = "pay-note"; box.textContent = ""; return; }
+  if (paid > r2(bill)) { box.className = "pay-note bad"; box.textContent = "That's more than the bill"; return; }
+  if (paid <= 0) { box.className = "pay-note"; box.innerHTML = `Not paid yet · customer owes <b>${money(bill)}</b>`; return; }
+  if (paid >= r2(bill)) { box.className = "pay-note ok"; box.innerHTML = "✓ Paid in full"; return; }
+  box.className = "pay-note part";
+  box.innerHTML = `Part payment · balance <b>${money(r2(bill - paid))}</b> to pay later`;
+}
+$("#oPaidAmt").addEventListener("input", () => { payFull = false; updateTotal(); });
+$("#oPaidAmt").addEventListener("focus", (e) => e.target.select());
+$("#oPayFull").onclick = () => { payFull = true; updateTotal(); };
+$("#oPayNone").onclick = () => { payFull = false; $("#oPaidAmt").value = ""; updateTotal(); };
 $("#oDiscount").addEventListener("focus", (e) => e.target.select());
 
 $("#itemRows").addEventListener("click", (e) => {
@@ -350,7 +422,6 @@ $("#itemRows").addEventListener("input", (e) => {
 });
 $("#itemRows").addEventListener("focusin", (e) => { if (e.target.matches("input")) e.target.select(); });
 
-$("#oPaid").onchange = () => { $("#oPaidOnWrap").hidden = !$("#oPaid").checked; if (!$("#oPaidOn").value) $("#oPaidOn").value = today(); };
 $("#oName").addEventListener("change", () => {
   // Fill phone for returning customers
   const n = $("#oName").value.trim().toLowerCase();
@@ -367,6 +438,8 @@ function resetOrderForm() {
   $("#oDate").value = today();
   $("#oPaidOn").value = today();
   $("#oPaidOnWrap").hidden = true;
+  $("#oPayEntry").hidden = false;
+  payFull = false;
   $("#orderFormTitle").textContent = "New order";
   $("#orderTicket").textContent = `Ticket ${ticketStr(nextTicket())}`;
   $("#oSave").textContent = "Save order";
@@ -383,9 +456,8 @@ function startEdit(o) {
   $("#oDate").value = o.dropDate || today();
   $("#oNote").value = o.note || "";
   $("#oDiscount").value = discountOf(o) || "";
-  $("#oPaid").checked = !!o.paid;
-  $("#oPaidOn").value = o.paidOn || today();
-  $("#oPaidOnWrap").hidden = !o.paid;
+  $("#oPayEntry").hidden = true; // payments are added from the order card while editing
+  payFull = false;
   $("#orderFormTitle").textContent = "Edit order";
   $("#orderTicket").textContent = `Ticket ${ticketStr(o.ticket)}`;
   $("#oSave").textContent = "Save changes";
@@ -401,8 +473,9 @@ $("#orderForm").onsubmit = async (e) => {
   const subtotal = Math.round(lines.reduce((s, l) => s + l.qty * l.price, 0) * 100) / 100;
   const discount = Math.round(Math.max(0, num($("#oDiscount").value)) * 100) / 100;
   if (discount > subtotal) return toast("The discount can't be more than the bill");
-  const total = subtotal - discount;
-  const paid = $("#oPaid").checked;
+  const total = r2(subtotal - discount);
+  const paidNow = editingId ? 0 : r2($("#oPaidAmt").value);
+  if (paidNow > total) return toast("The amount paid is more than the bill");
   const data = {
     customer: $("#oName").value.trim(),
     phone: $("#oPhone").value.trim(),
@@ -413,14 +486,11 @@ $("#orderForm").onsubmit = async (e) => {
     discount,
     total: Math.round(total * 100) / 100,
     itemCount: lines.reduce((s, l) => s + l.qty, 0),
-    paid,
-    paidOn: paid ? $("#oPaidOn").value || today() : null,
   };
   if (editingId) {
     if (!isManager) return toast("Only the manager can edit orders");
     const before = orders.find((o) => o.id === editingId);
-    if (data.paid && !before?.paid) { data.paidBy = me().name; data.paidByUid = me().uid; }
-    if (!data.paid) { data.paidBy = null; data.paidByUid = null; }
+    Object.assign(data, paymentFields(data.total, paymentsOf(before || {})));
     if (discount !== discountOf(before || {})) { data.discountBy = discount ? me().name : null; }
     await store.update("orders", editingId, data);
     toast("Order updated");
@@ -429,16 +499,34 @@ $("#orderForm").onsubmit = async (e) => {
     data.createdAt = Date.now();
     data.createdBy = me().name; data.createdByUid = me().uid;
     if (discount) data.discountBy = me().name;
-    if (data.paid) { data.paidBy = me().name; data.paidByUid = me().uid; }
+    const payments = paidNow > 0 ? [{ amount: paidNow, date: $("#oPaidOn").value || today(), by: me().name, byUid: me().uid }] : [];
+    Object.assign(data, paymentFields(data.total, payments));
     data.collected = false;
     data.collectedOn = null;
     await store.add("orders", data);
-    toast(`Saved ${ticketStr(data.ticket)} · ${money(total)}`);
+    const bal = r2(total - paidNow);
+    toast(`Saved ${ticketStr(data.ticket)} · ${money(total)}${paidNow > 0 && bal > 0 ? ` · balance ${money(bal)}` : ""}`);
   }
   const wasEditing = !!editingId;
   resetOrderForm();
   if (wasEditing) show("orders");
 };
+
+function payPill(o) {
+  if (fullyPaid(o)) {
+    const ps = paymentsOf(o), last = ps[ps.length - 1] || {};
+    return `<span class="pill ok">✓ Paid${ps.length > 1 ? " in full" : ""} ${fmtDate(last.date || o.paidOn)}${last.by ? ` · ${esc(last.by)}` : ""}</span>`;
+  }
+  const pd = paidSoFar(o);
+  if (pd > 0) return `<span class="pill part" title="Paid ${money(pd)} so far">◐ Owes ${money(balanceOf(o))}</span>`;
+  return `<span class="pill warn">● Not paid</span>`;
+}
+function receiptPayLines(o) {
+  const pd = paidSoFar(o), bal = balanceOf(o);
+  if (fullyPaid(o)) return ["Paid in full ✓"];
+  if (pd > 0) return [`Paid so far: ${money(pd)}`, `*Balance to pay: ${money(bal)}*`];
+  return ["Not paid yet"];
+}
 
 /* ================= Orders list ================= */
 function filteredOrders() {
@@ -452,8 +540,8 @@ function filteredOrders() {
     }
     switch (orderFilter) {
       case "waiting": return !o.collected;
-      case "unpaid": return !o.paid;
-      case "today": return o.dropDate === t || o.paidOn === t || o.collectedOn === t;
+      case "unpaid": return balanceOf(o) > 0;
+      case "today": return o.dropDate === t || paymentsOf(o).some((p) => p.date === t) || o.collectedOn === t;
       case "collected": return o.collected;
       default: return true;
     }
@@ -463,8 +551,9 @@ function filteredOrders() {
 function renderOrders() {
   const list = filteredOrders();
   const shown = list.slice(0, 200);
-  const sum = list.reduce((s, o) => s + num(o.total), 0);
-  $("#orderSummary").textContent = list.length ? `${list.length} order${list.length === 1 ? "" : "s"} · ${money(sum)}${list.length > shown.length ? " · showing latest 200" : ""}` : "";
+  const owingView = orderFilter === "unpaid" && !$("#search").value.trim();
+  const sum = list.reduce((s, o) => s + (owingView ? balanceOf(o) : num(o.total)), 0);
+  $("#orderSummary").textContent = list.length ? `${list.length} order${list.length === 1 ? "" : "s"} · ${money(sum)}${owingView ? " still owed" : ""}${list.length > shown.length ? " · showing latest 200" : ""}` : "";
   const waiting = orders.filter((o) => !o.collected).length;
   $("#pendingBadge").hidden = !waiting; $("#pendingBadge").textContent = waiting;
 
@@ -487,25 +576,24 @@ function renderOrders() {
       </div>
       <div class="order-items">${items}${o.note ? `<div class="note">“${esc(o.note)}”</div>` : ""}</div>
       <div class="status-row">
-        ${o.paid
-          ? `<span class="pill ok">✓ Paid ${fmtDate(o.paidOn)}${o.paidBy ? ` · ${esc(o.paidBy)}` : ""}</span>`
-          : `<span class="pill warn">● Not paid</span>`}
+        ${payPill(o)}
         ${o.collected
           ? `<span class="pill ok">✓ Collected ${fmtDate(o.collectedOn)}${o.collectedBy ? ` · ${esc(o.collectedBy)}` : ""}</span>`
           : `<span class="pill ${waitDays >= 7 ? "alert" : "info"}">◷ Not collected yet${waitDays > 0 ? ` · ${waitDays} day${waitDays === 1 ? "" : "s"}` : ""}</span>`}
       </div>
       <div class="order-actions">
-        ${!o.paid ? `<button class="btn small primary" data-a="pay">Mark paid</button>` : ""}
-        ${!o.collected ? `<button class="btn small ${o.paid ? "primary" : "ghost"}" data-a="collect">Mark collected</button>` : ""}
+        ${balanceOf(o) > 0 ? `<button class="btn small primary" data-a="pay">${paidSoFar(o) > 0 ? "Take balance" : "Take payment"}</button>` : ""}
+        ${!o.collected ? `<button class="btn small ${fullyPaid(o) ? "primary" : "ghost"}" data-a="collect">Mark collected</button>` : ""}
         <button class="btn small ghost share" data-a="receipt" title="${o.phone ? "Send receipt on WhatsApp" : "Share receipt"}" aria-label="${o.phone ? "Send receipt on WhatsApp" : "Share receipt"}"><svg viewBox="0 0 24 24"><path d="M21 11.5a8.4 8.4 0 0 1-12.4 7.4L3 21l2.1-5.4A8.4 8.4 0 1 1 21 11.5z"/></svg></button>
         <details class="more">
           <summary class="btn small ghost" aria-label="More actions">⋯</summary>
           <div class="menu">
             <button data-a="print">Print receipt</button>
             ${isManager ? `<button data-a="edit">Edit order</button>
-            ${o.paid ? `<button data-a="unpay">Undo paid</button>` : ""}
+            ${paymentsOf(o).length ? `<button data-a="unpay">Undo last payment</button>` : ""}
             ${o.collected ? `<button data-a="uncollect">Undo collected</button>` : ""}
             <button data-a="delete" class="danger">Delete order</button>` : ""}
+            ${paymentsOf(o).length ? `<div class="menu-note"><b>Payments</b>${paymentsOf(o).map((p) => `<div>${money(p.amount)} · ${fmtDate(p.date)}${p.by ? ` · ${esc(p.by)}` : ""}</div>`).join("")}</div>` : ""}
             ${o.createdBy ? `<div class="menu-note">Taken by ${esc(o.createdBy)}</div>` : ""}
           </div>
         </details>
@@ -522,15 +610,28 @@ $("#orderList").addEventListener("click", async (e) => {
   if (["unpay", "uncollect", "edit", "delete"].includes(btn.dataset.a) && !isManager) return toast("Only the manager can do that");
   switch (btn.dataset.a) {
     case "pay": {
-      const d = await askDate("Mark as paid", who); if (!d) return;
-      await store.update("orders", o.id, { paid: true, paidOn: d, paidBy: me().name, paidByUid: me().uid }); toast("Marked paid"); break;
+      const bal = balanceOf(o), pd = paidSoFar(o);
+      const res = await askDate(pd > 0 ? "Take balance" : "Take payment",
+        `${ticketStr(o.ticket)} ${o.customer} · total ${money(o.total)}${pd > 0 ? ` · paid so far ${money(pd)}` : ""} · balance ${money(bal)}`, today(), bal);
+      if (!res || !(res.amount > 0)) return;
+      const amount = Math.min(res.amount, bal);
+      const payments = [...paymentsOf(o), { amount, date: res.date, by: me().name, byUid: me().uid }];
+      await store.update("orders", o.id, paymentFields(o.total, payments));
+      const left = r2(bal - amount);
+      toast(left > 0 ? `${money(amount)} received · balance ${money(left)}` : "Paid in full ✓");
+      break;
     }
     case "collect": {
-      if (!o.paid && !confirm(`${o.customer} has not paid yet. Mark collected anyway?`)) return;
+      if (balanceOf(o) > 0 && !confirm(`${o.customer} still owes ${money(balanceOf(o))}. Mark collected anyway?`)) return;
       const d = await askDate("Mark as collected", who); if (!d) return;
       await store.update("orders", o.id, { collected: true, collectedOn: d, collectedBy: me().name, collectedByUid: me().uid }); toast("Marked collected"); break;
     }
-    case "unpay": if (confirm(`Undo the payment for ${who}?`)) await store.update("orders", o.id, { paid: false, paidOn: null, paidBy: null, paidByUid: null }); break;
+    case "unpay": {
+      const ps = paymentsOf(o), last = ps[ps.length - 1];
+      if (confirm(`Remove the last payment of ${money(last.amount)} (${fmtDate(last.date)}) from ${ticketStr(o.ticket)} ${o.customer}?`))
+        await store.update("orders", o.id, paymentFields(o.total, ps.slice(0, -1)));
+      break;
+    }
     case "uncollect": await store.update("orders", o.id, { collected: false, collectedOn: null, collectedBy: null, collectedByUid: null }); break;
     case "edit": startEdit(o); break;
     case "receipt": sendReceipt(o); break;
@@ -561,7 +662,7 @@ function receiptText(o) {
     "",
     ...(discountOf(o) ? [`Subtotal: ${money(subtotalOf(o))}`, `Discount: −${money(discountOf(o))}`] : []),
     `*Total: ${money(o.total)}*`,
-    o.paid ? `Paid ${fmtDate(o.paidOn)} ✓` : "Not paid yet",
+    ...receiptPayLines(o),
     o.collected ? `Collected ${fmtDate(o.collectedOn)}` : "Please bring this ticket number when collecting.",
     settings.shopPhone ? `\nCall us: ${settings.shopPhone}` : "",
     "Thank you!",
@@ -592,8 +693,9 @@ function printReceipt(o) {
   <div class="c">${esc(o.customer)}${o.phone ? ` · ${esc(o.phone)}` : ""}<br>Dropped ${esc(parseISO(o.dropDate).toLocaleDateString())}</div>
   <table>${(o.lines || []).map((l) => `<tr><td>${l.qty} × ${esc(l.name)}</td><td>${money(l.qty * l.price)}</td></tr>`).join("")}
   ${discountOf(o) ? `<tr class="sub"><td>Subtotal</td><td>${money(subtotalOf(o))}</td></tr><tr class="sub"><td>Discount</td><td>−${money(discountOf(o))}</td></tr>` : ""}
-  <tr class="tot"><td>Total</td><td>${money(o.total)}</td></tr></table>
-  <div class="c">${o.paid ? `PAID ${esc(parseISO(o.paidOn).toLocaleDateString())}` : "NOT PAID"}</div>
+  <tr class="tot"><td>Total</td><td>${money(o.total)}</td></tr>
+  ${paidSoFar(o) > 0 && balanceOf(o) > 0 ? `<tr class="sub"><td>Paid so far</td><td>${money(paidSoFar(o))}</td></tr><tr class="tot"><td>Balance to pay</td><td>${money(balanceOf(o))}</td></tr>` : ""}</table>
+  <div class="c">${fullyPaid(o) ? "PAID IN FULL" : paidSoFar(o) > 0 ? "PART PAID" : "NOT PAID"}</div>
   <p class="c">Thank you!</p><script>window.onload=()=>{window.print()}<\/script></body></html>`);
   w.document.close();
 }
@@ -655,8 +757,8 @@ const inRange = (d, r) => d && d >= r.start && d <= r.end;
 function renderReports() {
   const r = periodRange(period);
   $("#periodLabel").textContent = r.label;
-  const paidOrders = orders.filter((o) => o.paid && inRange(o.paidOn, r));
-  const income = paidOrders.reduce((s, o) => s + num(o.total), 0);
+  const pays = allPayments().filter((p) => inRange(p.date, r));
+  const income = pays.reduce((s, p) => s + num(p.amount), 0);
   const exp = expenses.filter((x) => inRange(x.date, r));
   const spent = exp.reduce((s, x) => s + num(x.amount), 0);
   const profit = income - spent;
@@ -667,7 +769,7 @@ function renderReports() {
   const discTotal = discounted.reduce((s, o) => s + discountOf(o), 0);
 
   $("#stats").innerHTML = `
-    <div class="stat"><div class="label">Money in</div><div class="value">${money(income)}</div><div class="sub">${paidOrders.length} payment${paidOrders.length === 1 ? "" : "s"}</div></div>
+    <div class="stat"><div class="label">Money in</div><div class="value">${money(income)}</div><div class="sub">${pays.length} payment${pays.length === 1 ? "" : "s"}</div></div>
     <div class="stat"><div class="label">Expenses</div><div class="value">${money(spent)}</div><div class="sub">${exp.length} record${exp.length === 1 ? "" : "s"}</div></div>
     ${isManager
       ? `<div class="stat hero ${profit < 0 ? "neg" : ""}"><div class="label">${profit < 0 ? "Loss" : "Profit"}</div><div class="value">${money(Math.abs(profit))}</div><div class="sub">money in − expenses</div></div>`
@@ -679,9 +781,10 @@ function renderReports() {
   const cr = period === "today" ? periodRange("week") : r;
   for (let d = parseISO(cr.start); iso(d) <= cr.end; d = addDays(d, 1)) days.push(iso(d));
   $("#chartTitle").textContent = period === "today" || period === "week" ? "This week by day" : `${r.label} by day`;
+  const chartPays = allPayments().filter((p) => inRange(p.date, { start: days[0], end: days[days.length - 1] }));
   const data = days.map((d) => ({
     d,
-    inc: orders.filter((o) => o.paid && o.paidOn === d).reduce((s, o) => s + num(o.total), 0),
+    inc: chartPays.filter((p) => p.date === d).reduce((s, p) => s + num(p.amount), 0),
     exp: expenses.filter((x) => x.date === d).reduce((s, x) => s + num(x.amount), 0),
   }));
   drawChart(data);
@@ -695,19 +798,19 @@ function renderReports() {
   $("#expenseBreakdown").innerHTML = barList(Object.entries(cats).sort((a, b) => b[1] - a[1]), money, "No expenses in this period.", "expense");
   if (isManager) {
     const by = {};
-    paidOrders.forEach((o) => { const k = o.paidBy || "Not recorded"; by[k] = (by[k] || 0) + num(o.total); });
+    pays.forEach((p) => { const k = p.by || "Not recorded"; by[k] = (by[k] || 0) + num(p.amount); });
     $("#staffBreakdown").innerHTML = barList(Object.entries(by).sort((a, b) => b[1] - a[1]), money, "No payments in this period.");
   }
 
   // Outstanding (all time)
   const t = today();
   const notCollected = orders.filter((o) => !o.collected);
-  const unpaid = orders.filter((o) => !o.paid);
-  const paidWaiting = notCollected.filter((o) => o.paid);
+  const unpaid = orders.filter((o) => balanceOf(o) > 0);
+  const paidWaiting = notCollected.filter(fullyPaid);
   const old = notCollected.filter((o) => daysBetween(o.dropDate || t, t) >= 7);
   $("#outstanding").innerHTML = `
     <button class="out" data-go="waiting"><b>${notCollected.length}</b><span>bags not collected</span></button>
-    <button class="out" data-go="unpaid"><b>${money(unpaid.reduce((s, o) => s + num(o.total), 0))}</b><span>owed by ${unpaid.length} customer${unpaid.length === 1 ? "" : "s"}</span></button>
+    <button class="out" data-go="unpaid"><b>${money(unpaid.reduce((s, o) => s + balanceOf(o), 0))}</b><span>owed by ${unpaid.length} customer${unpaid.length === 1 ? "" : "s"}</span></button>
     <button class="out" data-go="waiting"><b>${paidWaiting.length}</b><span>paid, waiting for pickup</span></button>
     <button class="out ${old.length ? "alert" : ""}" data-go="waiting"><b>${old.length}</b><span>waiting 7+ days</span></button>`;
 }
@@ -792,9 +895,9 @@ $$("#tabs button").forEach((b) => b.addEventListener("click", () => { if (b.data
 /* ================= CSV export ================= */
 $("#exportCsv").onclick = () => {
   const q = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
-  const rows = [["Type", "Ticket", "Customer", "Phone", "Drop-off", "Items", "Subtotal", "Discount", "Total", "Paid on", "Collected on", "Category", "Amount", "Date", "Note"]];
-  orders.forEach((o) => rows.push(["Order", o.ticket, o.customer, o.phone, o.dropDate, (o.lines || []).map((l) => `${l.qty} ${l.name}`).join("; "), subtotalOf(o), discountOf(o), o.total, o.paidOn || "", o.collectedOn || "", "", "", "", o.note]));
-  expenses.forEach((x) => rows.push(["Expense", "", "", "", "", "", "", "", "", "", "", x.category, x.amount, x.date, x.note]));
+  const rows = [["Type", "Ticket", "Customer", "Phone", "Drop-off", "Items", "Subtotal", "Discount", "Total", "Paid so far", "Balance", "Paid in full on", "Collected on", "Category", "Amount", "Date", "Note"]];
+  orders.forEach((o) => rows.push(["Order", o.ticket, o.customer, o.phone, o.dropDate, (o.lines || []).map((l) => `${l.qty} ${l.name}`).join("; "), subtotalOf(o), discountOf(o), o.total, paidSoFar(o), balanceOf(o), fullyPaid(o) ? o.paidOn || "" : "", o.collectedOn || "", "", "", "", o.note]));
+  expenses.forEach((x) => rows.push(["Expense", "", "", "", "", "", "", "", "", "", "", "", "", x.category, x.amount, x.date, x.note]));
   const blob = new Blob([rows.map((r) => r.map(q).join(",")).join("\n")], { type: "text/csv" });
   const a = Object.assign(document.createElement("a"), { href: URL.createObjectURL(blob), download: `laundry-${today()}.csv` });
   a.click(); URL.revokeObjectURL(a.href);
@@ -807,7 +910,7 @@ function renderStaff() {
   const isOwner = (m) => m.owner || m.id === profile.shopId;
   const rows = [...members].sort((a, b) => (a.role === b.role ? (a.name || "").localeCompare(b.name || "") : a.role === "manager" ? -1 : 1));
   const html = rows.map((m) => {
-    const takenToday = orders.filter((o) => o.paidByUid === m.id && o.paidOn === t).reduce((s, o) => s + num(o.total), 0);
+    const takenToday = allPayments().filter((p) => p.byUid === m.id && p.date === t).reduce((s, p) => s + num(p.amount), 0);
     const self = m.id === currentUser.uid;
     return `<div class="member" data-uid="${esc(m.id)}">
       <div class="avatar">${esc((m.name || m.email || "?").trim()[0] || "?").toUpperCase()}</div>
