@@ -7,17 +7,43 @@ const DEFAULT_SETTINGS = {
   shopPhone: "",
   countryCode: "233",
   items: [
-    { id: "shirt", name: "Shirts", price: 10 },
-    { id: "trousers", name: "Trousers", price: 10 },
-    { id: "jeans", name: "Jeans", price: 15 },
-    { id: "bedsheet", name: "Bedsheets", price: 20 },
-    { id: "pillowcase", name: "Pillowcases", price: 5 },
-    { id: "duvet", name: "Duvets", price: 50 },
-    { id: "singlet", name: "Singlets", price: 5 },
-    { id: "boxers", name: "Boxers", price: 5 },
+    { id: "shirt", name: "Shirts", price: 10, prices: { both: 10, wash: 7, iron: 4 } },
+    { id: "trousers", name: "Trousers", price: 10, prices: { both: 10, wash: 7, iron: 4 } },
+    { id: "jeans", name: "Jeans", price: 15, prices: { both: 15, wash: 10, iron: 6 } },
+    { id: "dress", name: "Dresses", price: 15, prices: { both: 15, wash: 10, iron: 6 } },
+    { id: "bedsheet", name: "Bedsheets", price: 20, prices: { both: 20, wash: 15, iron: 8 } },
+    { id: "pillowcase", name: "Pillowcases", price: 5, prices: { both: 5, wash: 4, iron: 2 } },
+    { id: "duvet", name: "Duvets", price: 50, prices: { both: 50, wash: 50, iron: null } },
+    { id: "singlet", name: "Singlets", price: 5, prices: { both: 5, wash: 4, iron: 2 } },
+    { id: "boxers", name: "Boxers", price: 5, prices: { both: 5, wash: 4, iron: null } },
   ],
   expenseCategories: ["Soap", "Detergent", "Bleach / Starch", "Electricity bill", "Water bill", "Gas / Fuel", "Rent", "Wages", "Other"],
 };
+
+/* ================= Services ================= */
+const SERVICES = [
+  { id: "both", label: "Wash & iron" },
+  { id: "wash", label: "Wash only" },
+  { id: "iron", label: "Iron only" },
+];
+const svcLabel = (id) => SERVICES.find((s) => s.id === id)?.label || "";
+// Price of an item for a service, or null if that service isn't offered for it.
+// Price lists saved before services existed have a single price: it is used for
+// Wash & iron and Wash only, and Iron only stays off until the manager sets a price.
+function priceFor(it, svc) {
+  if (it.prices) { const v = it.prices[svc]; return v === null || v === undefined || v === "" ? null : num(v); }
+  return svc === "iron" ? null : num(it.price);
+}
+// Group an order's lines by service, keeping the order of SERVICES. Lines saved
+// before services existed have no service and form their own group with no label.
+function linesByService(o) {
+  const groups = [];
+  [...SERVICES.map((s) => s.id), ""].forEach((svc) => {
+    const ls = (o.lines || []).filter((l) => (l.service || "") === svc);
+    if (ls.length) groups.push({ svc, label: svcLabel(svc), lines: ls });
+  });
+  return groups;
+}
 
 /* ================= State ================= */
 let store;
@@ -34,6 +60,10 @@ let editingId = null; // order being edited
 let qty = {}; // itemId -> count on the order form
 let linePrices = {}; // itemId -> price (frozen prices when editing)
 let lineNames = {}; // itemId -> name (for items removed from the price list since)
+// qty and linePrices are keyed "service:itemId", so one order can mix services.
+let service = "both"; // service shown on the order form
+try { service = localStorage.getItem("laundry-service") || "both"; } catch {}
+const keyOf = (svc, id) => `${svc}:${id}`;
 let orderFilter = "waiting";
 let period = "today";
 
@@ -280,23 +310,31 @@ function renderPriceRows(items) {
   $("#priceRows").innerHTML = items.map((it, i) => `
     <div class="price-row" data-i="${i}" data-id="${esc(it.id)}">
       <input class="pName" value="${esc(it.name)}" required aria-label="Item name" />
-      <div class="money-input"><span>${esc(settings.currency)}</span><input class="pPrice" type="number" inputmode="decimal" step="0.01" min="0" value="${num(it.price)}" required aria-label="Price" /></div>
+      ${SERVICES.map((s) => { const v = priceFor(it, s.id); return `
+      <label class="pcell"><span>${s.label}</span><input class="pPrice" data-svc="${s.id}" type="number" inputmode="decimal" step="0.01" min="0" value="${v === null ? "" : v}" placeholder="—" aria-label="${esc(it.name)} ${s.label} price" /></label>`; }).join("")}
       <button type="button" class="icon-btn pDel" title="Remove" aria-label="Remove ${esc(it.name)}">✕</button>
     </div>`).join("");
+  const missingIron = items.some((it) => !it.prices);
+  $("#priceNote").hidden = !missingIron;
 }
 function readPriceRows() {
-  return $$("#priceRows .price-row").map((r) => ({
-    id: r.dataset.id || slug($(".pName", r).value),
-    name: $(".pName", r).value.trim(),
-    price: num($(".pPrice", r).value),
-  })).filter((x) => x.name);
+  return $$("#priceRows .price-row").map((r) => {
+    const prices = {};
+    $$(".pPrice", r).forEach((inp) => { prices[inp.dataset.svc] = inp.value.trim() === "" ? null : num(inp.value); });
+    return {
+      id: r.dataset.id || slug($(".pName", r).value),
+      name: $(".pName", r).value.trim(),
+      price: prices.both ?? prices.wash ?? prices.iron ?? 0, // kept for older app versions
+      prices,
+    };
+  }).filter((x) => x.name);
 }
 $("#priceRows").addEventListener("click", (e) => {
   if (e.target.closest(".pDel")) e.target.closest(".price-row").remove();
 });
 $("#addItemType").onclick = () => {
   const items = readPriceRows();
-  items.push({ id: `${slug("new")}-${Date.now().toString(36)}`, name: "", price: 0 });
+  items.push({ id: `${slug("new")}-${Date.now().toString(36)}`, name: "", price: 0, prices: { both: null, wash: null, iron: null } });
   renderPriceRows(items);
   $("#priceRows .price-row:last-child .pName").focus();
 };
@@ -319,20 +357,46 @@ $("#settingsForm").onsubmit = async (e) => {
 };
 
 /* ================= Order form ================= */
-function formItems() {
-  // When editing, keep items from the order (with their old price) plus any current items.
-  const list = settings.items.map((it) => ({ ...it, price: linePrices[it.id] ?? it.price }));
-  Object.keys(linePrices).forEach((id) => {
-    if (!list.find((x) => x.id === id)) list.push({ id, name: lineNames[id] || id, price: linePrices[id] });
+// Items the form shows for one service. When editing, items already on the order keep
+// the price they were charged; items not offered for this service are left out.
+function formItems(svc = service) {
+  const list = settings.items
+    .map((it) => { const k = keyOf(svc, it.id); return { id: it.id, key: k, name: it.name, price: linePrices[k] ?? priceFor(it, svc) }; })
+    .filter((it) => it.price !== null);
+  Object.keys(linePrices).forEach((k) => {
+    const [s, id] = [k.slice(0, k.indexOf(":")), k.slice(k.indexOf(":") + 1)];
+    if (s === svc && !list.find((x) => x.key === k)) list.push({ id, key: k, name: lineNames[id] || id, price: linePrices[k] });
   });
   return list;
 }
+// Every counted item on the form, across all services.
+function formLines() {
+  return SERVICES.flatMap((s) => formItems(s.id).filter((it) => qty[it.key] > 0)
+    .map((it) => ({ id: it.id, name: it.name, price: it.price, qty: qty[it.key], service: s.id })));
+}
+function renderSvcTabs() {
+  const counts = Object.fromEntries(SERVICES.map((s) => [s.id, formItems(s.id).reduce((n, it) => n + (qty[it.key] || 0), 0)]));
+  $("#svcTabs").innerHTML = SERVICES.map((s) => `
+    <button type="button" role="tab" aria-selected="${s.id === service}" class="${s.id === service ? "active" : ""}" data-svc="${s.id}">
+      ${s.label}${counts[s.id] ? ` <b>${counts[s.id]}</b>` : ""}</button>`).join("");
+  const others = SERVICES.filter((s) => s.id !== service && counts[s.id]);
+  $("#svcOther").hidden = !others.length;
+  $("#svcOther").innerHTML = others.length ? `Also on this order: ${others.map((s) => `${counts[s.id]} for ${s.label.toLowerCase()}`).join(", ")}` : "";
+}
+$("#svcTabs").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-svc]"); if (!b) return;
+  service = b.dataset.svc;
+  try { localStorage.setItem("laundry-service", service); } catch {}
+  renderItemRows();
+});
 
 function renderItemRows() {
-  $("#itemRows").innerHTML = formItems().map((it) => {
-    const q = qty[it.id] || 0;
+  renderSvcTabs();
+  const items = formItems();
+  $("#itemRows").innerHTML = items.length ? items.map((it) => {
+    const q = qty[it.key] || 0;
     return `
-    <div class="item-row ${q ? "has" : ""}" data-id="${esc(it.id)}">
+    <div class="item-row ${q ? "has" : ""}" data-key="${esc(it.key)}">
       <div class="item-name"><b>${esc(it.name)}</b><span class="muted small">${money(it.price)} each</span></div>
       <div class="stepper">
         <button type="button" class="minus" aria-label="Less ${esc(it.name)}">−</button>
@@ -341,14 +405,15 @@ function renderItemRows() {
       </div>
       <div class="line-total">${q ? money(q * it.price) : ""}</div>
     </div>`;
-  }).join("");
+  }).join("") : `<div class="empty small">No prices set for ${esc(svcLabel(service).toLowerCase())}. The manager can add them in Settings → Price list.</div>`;
   updateTotal();
 }
 
 function updateTotal() {
   const items = formItems();
   let count = 0, total = 0;
-  items.forEach((it) => { const q = qty[it.id] || 0; count += q; total += q * it.price; });
+  formLines().forEach((l) => { count += l.qty; total += l.qty * l.price; });
+  total = r2(total);
   const disc = Math.max(0, num($("#oDiscount").value));
   const tooBig = disc > total;
   $("#oDiscount").setCustomValidity(tooBig ? "The discount can't be more than the bill" : "");
@@ -365,7 +430,7 @@ function updateTotal() {
   updatePayNote(pays);
   $("#oCount").textContent = `${count} item${count === 1 ? "" : "s"}`;
   $$("#itemRows .item-row").forEach((row) => {
-    const it = items.find((x) => x.id === row.dataset.id); const q = qty[it.id] || 0;
+    const it = items.find((x) => x.key === row.dataset.key); if (!it) return; const q = qty[it.key] || 0;
     row.classList.toggle("has", q > 0);
     $(".line-total", row).textContent = q ? money(q * it.price) : "";
   });
@@ -408,17 +473,19 @@ $("#oDiscount").addEventListener("focus", (e) => e.target.select());
 
 $("#itemRows").addEventListener("click", (e) => {
   const row = e.target.closest(".item-row"); if (!row) return;
-  const id = row.dataset.id, inp = $("input", row);
+  const id = row.dataset.key, inp = $("input", row);
   if (e.target.closest(".plus")) qty[id] = (qty[id] || 0) + 1;
   else if (e.target.closest(".minus")) qty[id] = Math.max(0, (qty[id] || 0) - 1);
   else return;
   inp.value = qty[id] || "";
   updateTotal();
+  renderSvcTabs();
 });
 $("#itemRows").addEventListener("input", (e) => {
   const row = e.target.closest(".item-row"); if (!row) return;
-  qty[row.dataset.id] = Math.max(0, Math.floor(num(e.target.value)));
+  qty[row.dataset.key] = Math.max(0, Math.floor(num(e.target.value)));
   updateTotal();
+  renderSvcTabs();
 });
 $("#itemRows").addEventListener("focusin", (e) => { if (e.target.matches("input")) e.target.select(); });
 
@@ -434,6 +501,7 @@ function nextTicket() { return orders.reduce((m, o) => Math.max(m, o.ticket || 0
 
 function resetOrderForm() {
   editingId = null; qty = {}; linePrices = {}; lineNames = {};
+  try { service = localStorage.getItem("laundry-service") || "both"; } catch { service = "both"; }
   $("#orderForm").reset();
   $("#oDate").value = today();
   $("#oPaidOn").value = today();
@@ -450,7 +518,11 @@ $("#oCancel").onclick = () => { resetOrderForm(); show("orders"); };
 
 function startEdit(o) {
   editingId = o.id; qty = {}; linePrices = {}; lineNames = {};
-  (o.lines || []).forEach((l) => { qty[l.id] = l.qty; linePrices[l.id] = l.price; lineNames[l.id] = l.name; });
+  (o.lines || []).forEach((l) => {
+    const k = keyOf(l.service || "wash", l.id);
+    qty[k] = (qty[k] || 0) + l.qty; linePrices[k] = l.price; lineNames[l.id] = l.name;
+  });
+  service = (o.lines || [])[0]?.service || "wash";
   $("#oName").value = o.customer || "";
   $("#oPhone").value = o.phone || "";
   $("#oDate").value = o.dropDate || today();
@@ -468,7 +540,7 @@ function startEdit(o) {
 
 $("#orderForm").onsubmit = async (e) => {
   e.preventDefault();
-  const lines = formItems().filter((it) => qty[it.id] > 0).map((it) => ({ id: it.id, name: it.name, price: it.price, qty: qty[it.id] }));
+  const lines = formLines();
   if (!lines.length) return toast("Add at least one item");
   const subtotal = Math.round(lines.reduce((s, l) => s + l.qty * l.price, 0) * 100) / 100;
   const discount = Math.round(Math.max(0, num($("#oDiscount").value)) * 100) / 100;
@@ -564,7 +636,7 @@ function renderOrders() {
   const t = today();
   $("#orderList").innerHTML = shown.map((o) => {
     const waitDays = o.collected ? 0 : daysBetween(o.dropDate || t, t);
-    const items = (o.lines || []).map((l) => `${l.qty} ${esc(l.name)}`).join(" · ");
+    const items = linesByService(o).map((g) => `<div>${g.label ? `<span class="svc-tag svc-${g.svc}">${g.label}</span> ` : ""}${g.lines.map((l) => `${l.qty} ${esc(l.name)}`).join(" · ")}</div>`).join("");
     return `
     <article class="order ${o.collected ? "done" : ""}" data-id="${o.id}">
       <div class="order-top">
@@ -652,7 +724,8 @@ $("#search").addEventListener("input", renderOrders);
 
 /* ================= Receipts ================= */
 function receiptText(o) {
-  const lines = (o.lines || []).map((l) => `${l.qty} × ${l.name} @ ${money(l.price)} = ${money(l.qty * l.price)}`).join("\n");
+  const lines = linesByService(o).map((g) => (g.label ? `_${g.label}_\n` : "") +
+    g.lines.map((l) => `${l.qty} × ${l.name} @ ${money(l.price)} = ${money(l.qty * l.price)}`).join("\n")).join("\n");
   return [
     `*${settings.shopName}*`,
     `Ticket ${ticketStr(o.ticket)} · ${o.customer}`,
@@ -687,11 +760,12 @@ function printReceipt(o) {
   w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Receipt ${ticketStr(o.ticket)}</title>
   <style>body{font:14px/1.45 system-ui,sans-serif;max-width:300px;margin:16px auto;color:#000}h1{font-size:18px;margin:0;text-align:center}
   .c{text-align:center}.big{font-size:28px;font-weight:700;text-align:center;margin:6px 0}table{width:100%;border-collapse:collapse;margin:10px 0}
-  td{padding:3px 0;border-bottom:1px dashed #999}td:last-child{text-align:right}.tot td{font-weight:700;border:0;padding-top:8px}.sub td{border:0;padding-top:6px}</style></head><body>
+  td{padding:3px 0;border-bottom:1px dashed #999}td:last-child{text-align:right}.tot td{font-weight:700;border:0;padding-top:8px}.sub td{border:0;padding-top:6px}.grp td{text-align:left!important;font-weight:700;border:0;padding-top:8px;font-size:12px;text-transform:uppercase;letter-spacing:.04em}</style></head><body>
   <h1>${esc(settings.shopName)}</h1>${settings.shopPhone ? `<div class="c">${esc(settings.shopPhone)}</div>` : ""}
   <div class="big">${ticketStr(o.ticket)}</div>
   <div class="c">${esc(o.customer)}${o.phone ? ` · ${esc(o.phone)}` : ""}<br>Dropped ${esc(parseISO(o.dropDate).toLocaleDateString())}</div>
-  <table>${(o.lines || []).map((l) => `<tr><td>${l.qty} × ${esc(l.name)}</td><td>${money(l.qty * l.price)}</td></tr>`).join("")}
+  <table>${linesByService(o).map((g) => (g.label ? `<tr class="grp"><td colspan="2">${g.label}</td></tr>` : "") +
+    g.lines.map((l) => `<tr><td>${l.qty} × ${esc(l.name)}</td><td>${money(l.qty * l.price)}</td></tr>`).join("")).join("")}
   ${discountOf(o) ? `<tr class="sub"><td>Subtotal</td><td>${money(subtotalOf(o))}</td></tr><tr class="sub"><td>Discount</td><td>−${money(discountOf(o))}</td></tr>` : ""}
   <tr class="tot"><td>Total</td><td>${money(o.total)}</td></tr>
   ${paidSoFar(o) > 0 && balanceOf(o) > 0 ? `<tr class="sub"><td>Paid so far</td><td>${money(paidSoFar(o))}</td></tr><tr class="tot"><td>Balance to pay</td><td>${money(balanceOf(o))}</td></tr>` : ""}</table>
@@ -793,6 +867,9 @@ function renderReports() {
   const counts = {};
   dropped.forEach((o) => (o.lines || []).forEach((l) => { counts[l.name] = (counts[l.name] || 0) + l.qty; }));
   $("#itemBreakdown").innerHTML = barList(Object.entries(counts).sort((a, b) => b[1] - a[1]), (v) => `${v}`, "No items in this period.");
+  const bySvc = {};
+  dropped.forEach((o) => (o.lines || []).forEach((l) => { const k = svcLabel(l.service) || "Not recorded"; bySvc[k] = (bySvc[k] || 0) + l.qty; }));
+  $("#serviceBreakdown").innerHTML = barList(Object.entries(bySvc).sort((a, b) => b[1] - a[1]), (v) => `${v} item${v === 1 ? "" : "s"}`, "No items in this period.");
   const cats = {};
   exp.forEach((x) => { cats[x.category] = (cats[x.category] || 0) + num(x.amount); });
   $("#expenseBreakdown").innerHTML = barList(Object.entries(cats).sort((a, b) => b[1] - a[1]), money, "No expenses in this period.", "expense");
@@ -896,7 +973,7 @@ $$("#tabs button").forEach((b) => b.addEventListener("click", () => { if (b.data
 $("#exportCsv").onclick = () => {
   const q = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
   const rows = [["Type", "Ticket", "Customer", "Phone", "Drop-off", "Items", "Subtotal", "Discount", "Total", "Paid so far", "Balance", "Paid in full on", "Collected on", "Category", "Amount", "Date", "Note"]];
-  orders.forEach((o) => rows.push(["Order", o.ticket, o.customer, o.phone, o.dropDate, (o.lines || []).map((l) => `${l.qty} ${l.name}`).join("; "), subtotalOf(o), discountOf(o), o.total, paidSoFar(o), balanceOf(o), fullyPaid(o) ? o.paidOn || "" : "", o.collectedOn || "", "", "", "", o.note]));
+  orders.forEach((o) => rows.push(["Order", o.ticket, o.customer, o.phone, o.dropDate, (o.lines || []).map((l) => `${l.qty} ${l.name}${l.service ? ` (${svcLabel(l.service)})` : ""}`).join("; "), subtotalOf(o), discountOf(o), o.total, paidSoFar(o), balanceOf(o), fullyPaid(o) ? o.paidOn || "" : "", o.collectedOn || "", "", "", "", o.note]));
   expenses.forEach((x) => rows.push(["Expense", "", "", "", "", "", "", "", "", "", "", "", "", x.category, x.amount, x.date, x.note]));
   const blob = new Blob([rows.map((r) => r.map(q).join(",")).join("\n")], { type: "text/csv" });
   const a = Object.assign(document.createElement("a"), { href: URL.createObjectURL(blob), download: `laundry-${today()}.csv` });

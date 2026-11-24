@@ -91,7 +91,9 @@
           </div>
 
           <div class="card">
-            <div class="card-head"><h3>Items</h3><span class="muted small">Tap + to count</span></div>
+            <div class="card-head"><h3>Items</h3><span class="muted small">Pick the service, then tap + to count</span></div>
+            <div class="svc-tabs" id="svcTabs" role="tablist" aria-label="Service"></div>
+            <div id="svcOther" class="svc-other" hidden></div>
             <div id="itemRows" class="item-rows"></div>
           </div>
 
@@ -181,7 +183,8 @@
           <div id="chart" class="chart"></div>
         </div>
         <div class="grid-2col">
-          <div class="card"><div class="card-head"><h3>Items washed</h3></div><div id="itemBreakdown"></div></div>
+          <div class="card"><div class="card-head"><h3>Items</h3></div><div id="itemBreakdown"></div>
+            <div class="card-head sub-head"><h3>By service</h3></div><div id="serviceBreakdown"></div></div>
           <div class="card"><div class="card-head"><h3>Expenses by type</h3></div><div id="expenseBreakdown"></div></div>
         </div>
         <div class="card mgr-only">
@@ -206,7 +209,9 @@
           </div>
           <div class="card">
             <div class="card-head"><h3>Price list</h3><button type="button" class="btn small ghost" id="addItemType">+ Add item</button></div>
-            <p class="muted small">Price changes apply to new orders. Old orders keep the price they were charged.</p>
+            <p class="muted small">Prices in <span class="cur-sym">GH₵</span> for each service. Leave a box empty if you don't offer that service for the item. Price changes apply to new orders; old orders keep the price they were charged.</p>
+            <p class="notice" id="priceNote" hidden>New: each item now has a price for <b>Wash &amp; iron</b>, <b>Wash only</b> and <b>Iron only</b>. Your old prices were copied to the first two. Fill in the <b>Iron only</b> prices (and adjust the others) then tap <b>Save settings</b>.</p>
+            <div class="price-head"><span>Item</span><span>Wash &amp; iron</span><span>Wash only</span><span>Iron only</span><span></span></div>
             <div id="priceRows" class="price-rows"></div>
           </div>
           <div class="card">
