@@ -79,6 +79,19 @@ async function createFirebaseStore() {
     db = fs.getFirestore(app);
   }
   let shopId = null;
+  const offlineError = (e) => ["unavailable", "deadline-exceeded"].includes(e?.code) || e?.message === "timeout" || !navigator.onLine;
+  const withTimeout = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), ms))]);
+  async function lookUpShop(uid) {
+    const u = await fs.getDoc(fs.doc(db, "users", uid));
+    if (!u.exists()) return { status: "new" };
+    const sid = u.data().shopId;
+    let m;
+    try { m = await fs.getDoc(fs.doc(db, "shops", sid, "members", uid)); }
+    catch (e) { if (offlineError(e)) throw e; return { status: "removed" }; }
+    if (!m.exists()) return { status: "removed" };
+    shopId = sid;
+    return { status: "ok", shopId: sid, role: m.data().role, name: m.data().name, owner: sid === uid };
+  }
   const shopRef = () => fs.doc(db, "shops", shopId);
   const col = (name) => fs.collection(db, "shops", shopId, name);
   const emailOf = (u) => (u.email || "").trim().toLowerCase();
@@ -107,15 +120,23 @@ async function createFirebaseStore() {
           await Promise.all([fs.deleteDoc(inv.ref), fs.deleteDoc(fs.doc(db, "shops", sid, "invites", email))]).catch(() => {});
         }
       } catch (e) { console.warn("invite check", e); }
-      // 2) Look up the shop this account belongs to.
-      const u = await fs.getDoc(fs.doc(db, "users", uid));
-      if (!u.exists()) return { status: "new" };
-      const sid = u.data().shopId;
-      let m;
-      try { m = await fs.getDoc(fs.doc(db, "shops", sid, "members", uid)); } catch { return { status: "removed" }; }
-      if (!m.exists()) return { status: "removed" };
-      shopId = sid;
-      return { status: "ok", shopId: sid, role: m.data().role, name: m.data().name, owner: sid === uid };
+      // 2) Look up the shop this account belongs to. With no (or very slow) internet, use the
+      //    shop and role saved on this phone the last time it was online.
+      const savedKey = `laundry-profile-${uid}`;
+      let hasSaved = false;
+      try { hasSaved = !!localStorage.getItem(savedKey); } catch {}
+      try {
+        // Only give up on a slow connection when there is a saved copy to fall back to.
+        const p = await (hasSaved ? withTimeout(lookUpShop(uid), 8000) : lookUpShop(uid));
+        if (p.status === "ok") { try { localStorage.setItem(savedKey, JSON.stringify(p)); } catch {} }
+        else { try { localStorage.removeItem(savedKey); } catch {} }
+        return p;
+      } catch (e) {
+        let saved = null;
+        try { saved = JSON.parse(localStorage.getItem(savedKey)); } catch {}
+        if (saved?.status === "ok") { shopId = saved.shopId; return { ...saved, fromSaved: true }; }
+        throw e;
+      }
     },
 
     // The first person to set up a shop becomes its manager.

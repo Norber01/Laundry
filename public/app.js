@@ -1054,4 +1054,14 @@ $("#eDate").value = today();
 // Keep "today" correct if the app stays open past midnight
 setInterval(() => { if ($("#eDate").value < today() && !document.activeElement?.closest("#expenseForm")) $("#eDate").value = today(); }, 60000);
 
+/* ================= Offline ================= */
+// Save the app on the phone so it opens without internet (see sw.js).
+if ("serviceWorker" in navigator && location.protocol !== "file:") {
+  window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch((e) => console.warn("offline mode", e)));
+}
+function showOnline() { $("#offlineBanner").hidden = navigator.onLine; }
+window.addEventListener("online", () => { showOnline(); toast("Back online. Syncing…"); });
+window.addEventListener("offline", showOnline);
+showOnline();
+
 boot();

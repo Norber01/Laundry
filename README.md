@@ -16,6 +16,10 @@ A simple laundry shop manager that runs on Firebase. It works on phones and comp
 
 "Money in" counts each payment on the day it was **received**, not the day the clothes were dropped off. So GH₵ 60 paid on Monday and the GH₵ 40 balance paid on Friday show up on those two days.
 
+## Works without data
+
+After the app has opened once with internet on a phone, it saves itself there (`public/sw.js`) and opens even with no data, from the browser or the home-screen icon. Orders, payments and expenses entered offline are kept on the phone and sync automatically when data comes back. A dark *Offline* bar shows while there's no connection. Signing in for the first time on a phone needs data.
+
 ## Manager and shop staff
 
 Each person has their own login and one of two roles.
