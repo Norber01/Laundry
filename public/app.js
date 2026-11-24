@@ -1059,9 +1059,5 @@ setInterval(() => { if ($("#eDate").value < today() && !document.activeElement?.
 if ("serviceWorker" in navigator && location.protocol !== "file:") {
   window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch((e) => console.warn("offline mode", e)));
 }
-function showOnline() { $("#offlineBanner").hidden = navigator.onLine; }
-window.addEventListener("online", () => { showOnline(); toast("Back online. Syncing…"); });
-window.addEventListener("offline", showOnline);
-showOnline();
 
 boot();

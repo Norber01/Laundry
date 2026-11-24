@@ -424,9 +424,3 @@ body.staff .role-chip { color: var(--warn); background: var(--warn-bg); }
 .svc-tabs button { position: relative; white-space: nowrap; }
 .svc-tabs button b { position: absolute; top: -6px; right: -2px; margin: 0; box-shadow: 0 0 0 2px var(--surface-2); }
 
-/* ---- Offline ---- */
-.offline-banner { display: flex; align-items: center; gap: 10px; justify-content: center; background: var(--text); color: var(--bg); font-size: 13px; padding: 8px 16px; }
-.offline-banner svg { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
-.offline-banner .when-signin { display: none; }
-body:has(#auth:not([hidden])) .offline-banner .when-app, body:has(#setup:not([hidden])) .offline-banner .when-app { display: none; }
-body:has(#auth:not([hidden])) .offline-banner .when-signin, body:has(#setup:not([hidden])) .offline-banner .when-signin { display: inline; }

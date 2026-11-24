@@ -18,7 +18,7 @@ A simple laundry shop manager that runs on Firebase. It works on phones and comp
 
 ## Works without data
 
-After the app has opened once with internet on a phone, it saves itself there (`public/sw.js`) and opens even with no data, from the browser or the home-screen icon. Orders, payments and expenses entered offline are kept on the phone and sync automatically when data comes back. A dark *Offline* bar shows while there's no connection. Signing in for the first time on a phone needs data.
+After the app has opened once with internet on a phone, it saves itself there (`public/sw.js`) and opens even with no data, from the browser or the home-screen icon. Orders, payments and expenses entered offline are kept on the phone and sync automatically when data comes back. Nothing on screen says whether the app is online or offline; syncing happens in the background. Signing in for the first time on a phone needs data.
 
 ## Manager and shop staff
 
